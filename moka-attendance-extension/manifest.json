@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Moka 考勤工时助手",
+  "version": "1.0.0",
+  "description": "监控 Moka 考勤详情接口，按打卡时间减去午休 1 小时自动统计每日工时",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["https://core.mokahr.com/*", "https://*.mokahr.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*.mokahr.com/*", "https://core.mokahr.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["https://*.mokahr.com/*", "https://core.mokahr.com/*"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Moka 考勤工时",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
