@@ -10,12 +10,14 @@
 https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail?bus=20
 ```
 
-## 安装
+## 本地安装（加载本机目录即可）
+
+本插件不依赖服务器，代码与统计数据都在本机。
 
 1. 打开 Chrome，访问 `chrome://extensions/`
 2. 右上角开启「开发者模式」
 3. 点击「加载已解压的扩展程序」
-4. 选择本目录 `moka-attendance-extension`
+4. 选择本机目录：`moka-attendance-extension`（即含 `manifest.json` 的文件夹）
 
 ## 使用
 
