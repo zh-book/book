@@ -1,25 +1,39 @@
 {
   "manifest_version": 3,
   "name": "Moka 考勤工时助手",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "监控 Moka 考勤详情接口，按打卡时间减去午休 1 小时自动统计每日工时",
-  "permissions": ["storage", "scripting"],
-  "host_permissions": ["https://core.mokahr.com/*", "https://*.mokahr.com/*"],
+  "permissions": ["storage", "scripting", "webRequest", "tabs"],
+  "host_permissions": [
+    "https://core.mokahr.com/*",
+    "https://*.mokahr.com/*",
+    "http://*.mokahr.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://*.mokahr.com/*", "https://core.mokahr.com/*"],
+      "matches": [
+        "https://*.mokahr.com/*",
+        "http://*.mokahr.com/*",
+        "https://core.mokahr.com/*"
+      ],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.mokahr.com/*",
+        "http://*.mokahr.com/*",
+        "https://core.mokahr.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_start",
-      "all_frames": true
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": ["inject.js"],
-      "matches": ["https://*.mokahr.com/*", "https://core.mokahr.com/*"]
+      "all_frames": true,
+      "world": "ISOLATED"
     }
   ],
   "action": {

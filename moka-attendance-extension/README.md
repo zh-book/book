@@ -18,13 +18,22 @@ https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail?bus=20
 2. 右上角开启「开发者模式」
 3. 点击「加载已解压的扩展程序」
 4. 选择本机目录：`moka-attendance-extension`（即含 `manifest.json` 的文件夹）
+5. **更新代码后务必点「重新加载」，并刷新已打开的考勤页**
+
+也可直接解压 `dist/moka-attendance-extension.zip` 后按上面步骤加载。
 
 ## 使用
 
 1. 登录并打开 Moka 考勤相关页面（`*.mokahr.com`）
-2. 浏览每日考勤详情；插件会拦截上述接口响应并写入本地
-3. 点击浏览器工具栏图标，查看每日工时、合计与日均
-4. 角标数字为已记录天数的合计工时（小时）
+2. **硬刷新页面**（Ctrl/Cmd+Shift+R），再点开某天考勤详情以触发接口
+3. 点击插件图标：顶部「监听状态」应出现「已看到接口」或「已捕获」
+4. 列表展示每日工时、合计与日均；角标为合计小时数
+
+### 监听原理（v1.1）
+
+1. **页面钩子**：`MAIN` world 注入，拦截页面 `fetch` / `XHR`
+2. **网络兜底**：`webRequest` 发现目标接口后，扩展凭 cookie 再拉一次响应体
+   （即使前端页面不在 `mokahr.com`，只要请求打到 `core.mokahr.com` 也能捕获）
 
 ## 计算示例
 
