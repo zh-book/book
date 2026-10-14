@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Moka 考勤工时</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>Moka 考勤工时</h1>
+        <p class="sub">打卡时长 − 午休 1 小时</p>
+      </div>
+      <button id="clearBtn" type="button" class="ghost" title="清空本地记录">
+        清空
+      </button>
+    </header>
+
+    <section class="summary" id="summary">
+      <div class="stat">
+        <span class="label">已记录天数</span>
+        <strong id="dayCount">0</strong>
+      </div>
+      <div class="stat">
+        <span class="label">合计工时</span>
+        <strong id="totalHours">—</strong>
+      </div>
+      <div class="stat">
+        <span class="label">日均工时</span>
+        <strong id="avgHours">—</strong>
+      </div>
+    </section>
+
+    <section class="status" id="statusBox">
+      <div class="status-title">监听状态</div>
+      <div class="status-line" id="statusLine">尚未检测到接口请求</div>
+      <div class="status-meta" id="statusMeta">
+        安装/更新后请刷新考勤页，再点开某天详情。
+      </div>
+    </section>
+
+    <section class="hint" id="emptyHint">
+      打开 Moka 考勤详情页并浏览日期后，本插件会自动捕获接口并计算工时。
+    </section>
+
+    <ul class="list" id="list"></ul>
+
+    <script src="hours.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
