@@ -24,8 +24,46 @@
   let loginInfo = null;
   let running = false;
   let abortFlag = false;
+  let contextDead = false;
 
   const pending = new Map();
+
+  function extensionAlive() {
+    try {
+      return Boolean(chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
+  /** 扩展热重载后旧页面脚本会失效，统一吞掉避免 Uncaught */
+  function safeSendMessage(message) {
+    if (contextDead || !extensionAlive()) {
+      contextDead = true;
+      return Promise.resolve(null);
+    }
+    try {
+      const ret = chrome.runtime.sendMessage(message);
+      if (ret && typeof ret.then === 'function') {
+        return ret.catch((err) => {
+          const msg = String(err && err.message ? err.message : err);
+          if (/Extension context invalidated/i.test(msg)) {
+            contextDead = true;
+            setMeta('扩展已重新加载，请刷新本页后再批量拉取');
+          }
+          return null;
+        });
+      }
+      return Promise.resolve(ret);
+    } catch (err) {
+      const msg = String(err && err.message ? err.message : err);
+      if (/Extension context invalidated/i.test(msg)) {
+        contextDead = true;
+        setMeta('扩展已重新加载，请刷新本页后再批量拉取');
+      }
+      return Promise.resolve(null);
+    }
+  }
 
   function monthInputValue(d) {
     const y = d.getFullYear();
@@ -228,6 +266,12 @@
 
   async function startBatch() {
     if (running) return;
+    if (!extensionAlive()) {
+      contextDead = true;
+      setMeta('扩展上下文已失效，请刷新本页后再试');
+      return;
+    }
+
     const monthEl = document.getElementById('mokaMonth');
     const monthKey = monthEl && monthEl.value;
     if (!monthKey) {
@@ -259,58 +303,70 @@
         };
 
     window.postMessage({ source: SOURCE, type: 'BATCH_START' }, '*');
-    chrome.runtime.sendMessage({ type: 'BATCH_START', monthKey });
+    await safeSendMessage({ type: 'BATCH_START', monthKey });
 
     let okCount = 0;
     let failCount = 0;
     let mismatchCount = 0;
-    for (let i = 0; i < days.length; i += 1) {
-      if (abortFlag) break;
-      const date = days[i];
-      setMeta(`正在拉取 ${date}（${i + 1}/${days.length}）…`);
-      setProgress(i, days.length);
+    try {
+      for (let i = 0; i < days.length; i += 1) {
+        if (abortFlag || contextDead) break;
+        if (!extensionAlive()) {
+          contextDead = true;
+          break;
+        }
+        const date = days[i];
+        setMeta(`正在拉取 ${date}（${i + 1}/${days.length}）…`);
+        setProgress(i, days.length);
 
-      const result = await requestDayWithTemplate(date, baseTemplate);
-      const matched =
-        result &&
-        result.ok &&
-        result.payload &&
-        result.payload.code === 200 &&
-        result.dateMatched !== false;
-      if (matched) {
-        okCount += 1;
-      } else {
-        failCount += 1;
-        if (result && result.dateMatched === false) mismatchCount += 1;
+        const result = await requestDayWithTemplate(date, baseTemplate);
+        const matched =
+          result &&
+          result.ok &&
+          result.payload &&
+          result.payload.code === 200 &&
+          result.dateMatched !== false;
+        if (matched) {
+          okCount += 1;
+        } else {
+          failCount += 1;
+          if (result && result.dateMatched === false) mismatchCount += 1;
+        }
+        await sleep(280);
       }
-      await sleep(280);
+    } finally {
+      window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
+      await safeSendMessage({ type: 'BATCH_END' });
+
+      setProgress(days.length, days.length);
+      const mismatchTip = mismatchCount
+        ? `，日期不一致 ${mismatchCount}`
+        : '';
+      if (contextDead) {
+        setMeta(
+          `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}`
+        );
+      } else {
+        setMeta(
+          abortFlag
+            ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
+            : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
+        );
+      }
+
+      running = false;
+      if (btn) btn.disabled = false;
+      if (stopBtn) stopBtn.hidden = true;
+
+      await safeSendMessage({
+        type: 'BATCH_DONE',
+        monthKey,
+        okCount,
+        failCount,
+        mismatchCount,
+        aborted: abortFlag || contextDead
+      });
     }
-
-    window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
-    chrome.runtime.sendMessage({ type: 'BATCH_END' });
-
-    setProgress(days.length, days.length);
-    const mismatchTip = mismatchCount
-      ? `，日期不一致 ${mismatchCount}`
-      : '';
-    setMeta(
-      abortFlag
-        ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
-        : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
-    );
-
-    running = false;
-    if (btn) btn.disabled = false;
-    if (stopBtn) stopBtn.hidden = true;
-
-    chrome.runtime.sendMessage({
-      type: 'BATCH_DONE',
-      monthKey,
-      okCount,
-      failCount,
-      mismatchCount,
-      aborted: abortFlag
-    });
   }
 
   window.addEventListener('message', (event) => {
@@ -320,14 +376,14 @@
 
     if (data.type === 'API_TEMPLATE') {
       template = data.template || null;
-      chrome.runtime.sendMessage({ type: 'SAVE_API_TEMPLATE', template });
+      safeSendMessage({ type: 'SAVE_API_TEMPLATE', template });
       refreshMeta();
       return;
     }
 
     if (data.type === 'LOGIN_PROBE') {
       loginInfo = data;
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: 'SAVE_LOGIN_PROBE',
         probe: {
           href: data.href,
