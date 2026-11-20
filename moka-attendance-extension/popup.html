@@ -17,18 +17,46 @@
       </button>
     </header>
 
-    <section class="summary" id="summary">
+    <section class="month-nav" id="monthNav">
+      <button id="prevMonthBtn" type="button" class="nav-btn" aria-label="上一月">
+        ‹
+      </button>
+      <div class="month-center">
+        <strong id="monthLabel">—</strong>
+        <span id="monthRangeHint" class="month-hint"></span>
+      </div>
+      <button id="nextMonthBtn" type="button" class="nav-btn" aria-label="下一月">
+        ›
+      </button>
+    </section>
+
+    <section class="summary" id="monthSummary" aria-label="本月汇总">
       <div class="stat">
-        <span class="label">已记录天数</span>
-        <strong id="dayCount">0</strong>
+        <span class="label">本月天数</span>
+        <strong id="monthDayCount">0</strong>
       </div>
       <div class="stat">
-        <span class="label">合计工时</span>
-        <strong id="totalHours">—</strong>
+        <span class="label">本月合计</span>
+        <strong id="monthTotalHours">—</strong>
       </div>
       <div class="stat">
-        <span class="label">日均工时</span>
-        <strong id="avgHours">—</strong>
+        <span class="label">本月日均</span>
+        <strong id="monthAvgHours">—</strong>
+      </div>
+    </section>
+
+    <section class="summary overall" id="overallSummary" aria-label="全部汇总">
+      <div class="stat">
+        <span class="label">总天数</span>
+        <strong id="allDayCount">0</strong>
+      </div>
+      <div class="stat">
+        <span class="label">总合计</span>
+        <strong id="allTotalHours">—</strong>
+      </div>
+      <div class="stat">
+        <span class="label">总日均</span>
+        <strong id="allAvgHours">—</strong>
       </div>
     </section>
 

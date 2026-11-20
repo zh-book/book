@@ -92,11 +92,73 @@
     };
   }
 
+  /** 从 YYYY-MM-DD 取 YYYY-MM */
+  function monthKeyFromDate(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return null;
+    const m = dateStr.match(/^(\d{4})-(\d{2})/);
+    return m ? `${m[1]}-${m[2]}` : null;
+  }
+
+  function shiftMonthKey(monthKey, delta) {
+    const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1 + delta, 1);
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    return `${y}-${mo}`;
+  }
+
+  function formatMonthLabel(monthKey) {
+    const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if (!m) return String(monthKey || '—');
+    return `${m[1]}年${m[2]}月`;
+  }
+
+  function currentMonthKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  function summarizeRecords(records) {
+    const items = Object.values(records || {});
+    const okItems = items.filter((r) => r && r.status === 'ok' && r.workMs != null);
+    const totalMs = okItems.reduce((sum, r) => sum + r.workMs, 0);
+    return {
+      dayCount: okItems.length,
+      totalMs,
+      avgMs: okItems.length ? totalMs / okItems.length : null
+    };
+  }
+
+  function listMonthKeys(records) {
+    const set = new Set();
+    for (const r of Object.values(records || {})) {
+      const key = monthKeyFromDate(r && r.date);
+      if (key) set.add(key);
+    }
+    return Array.from(set).sort();
+  }
+
+  function filterRecordsByMonth(records, monthKey) {
+    const out = {};
+    for (const [date, r] of Object.entries(records || {})) {
+      if (monthKeyFromDate(r && r.date) === monthKey) out[date] = r;
+    }
+    return out;
+  }
+
   root.MokaHours = {
     LUNCH_MS,
     parseClockTime,
     formatDuration,
     formatHoursDecimal,
-    extractDayRecord
+    extractDayRecord,
+    monthKeyFromDate,
+    shiftMonthKey,
+    formatMonthLabel,
+    currentMonthKey,
+    summarizeRecords,
+    listMonthKeys,
+    filterRecordsByMonth
   };
 })(typeof self !== 'undefined' ? self : window);

@@ -63,11 +63,73 @@ h1 {
   border-color: var(--accent);
 }
 
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 16px 4px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.nav-btn {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--accent);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.nav-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.month-center {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.month-center strong {
+  display: block;
+  font-size: 16px;
+}
+
+.month-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  padding: 8px 16px 12px;
+  padding: 8px 16px 4px;
+}
+
+.summary.overall {
+  padding-top: 4px;
+  padding-bottom: 12px;
+}
+
+.summary.overall .stat {
+  background: rgba(15, 118, 110, 0.06);
 }
 
 .stat {
