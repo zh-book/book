@@ -130,10 +130,39 @@ const cal = MokaHours.buildMonthCalendar('2026-08', {
 });
 assert(cal.length % 7 === 0, '日历格数应为 7 的倍数');
 const day6 = cal.find((c) => c.date === '2026-08-06');
-assert(day6 && day6.level === 'high', `8/6 等级应为 high，实际 ${day6 && day6.level}`);
+assert(day6 && day6.level === 'h-10', `8/6 等级应为 h-10，实际 ${day6 && day6.level}`);
+assert(day6.emoji === '😐', `8/6 表情应为 😐，实际 ${day6.emoji}`);
 assert(
   MokaHours.formatCalendarHours(day6.record) === '10.1',
   `日历工时格式错误: ${MokaHours.formatCalendarHours(day6.record)}`
 );
+
+const monthPayload = {
+  code: 200,
+  data: {
+    year: 2026,
+    month: 12,
+    days: [
+      { day: '2026-12-01', type: 1, fixedTimeRest: false, workDay: false },
+      { day: '2026-12-05', type: 2, fixedTimeRest: true, workDay: false }
+    ]
+  }
+};
+assert(MokaHours.isMonthCalendarPayload(monthPayload), '应识别月历接口');
+const extracted = MokaHours.extractDayMetaMap(monthPayload);
+assert(extracted.days['2026-12-01'].isWorkDay, '12-01 应为工作日');
+assert(extracted.days['2026-12-05'].isRestDay, '12-05 应为休息日');
+
+const restStyle = MokaHours.calendarStyle(
+  { status: 'no_clock', workMs: null },
+  extracted.days['2026-12-05']
+);
+assert(restStyle.level === 'rest', '休息日无打卡应为 rest');
+
+const h8 = MokaHours.calendarStyle(
+  { status: 'ok', workMs: 8 * 3600000 },
+  extracted.days['2026-12-01']
+);
+assert(h8.level === 'h-8' && h8.emoji === '😊', '8h 应为绿色笑脸');
 
 console.log('All hours tests passed.');

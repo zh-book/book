@@ -147,22 +147,112 @@
     return out;
   }
 
+  /** 是否月历接口响应：data.year/month/days */
+  function isMonthCalendarPayload(payload) {
+    return Boolean(
+      payload &&
+        payload.code === 200 &&
+        payload.data &&
+        typeof payload.data.year === 'number' &&
+        typeof payload.data.month === 'number' &&
+        Array.isArray(payload.data.days)
+    );
+  }
+
+  /**
+   * 从月历接口抽出每日元数据。
+   * type=2 / fixedTimeRest → 休息日；type=1 → 工作日（含调休上班）
+   */
+  function extractDayMetaMap(payload) {
+    if (!isMonthCalendarPayload(payload)) return null;
+    const map = {};
+    for (const item of payload.data.days) {
+      if (!item || !item.day) continue;
+      const rest = item.type === 2 || item.fixedTimeRest === true;
+      map[item.day] = {
+        date: item.day,
+        type: item.type,
+        workDay: Boolean(item.workDay),
+        fixedTimeRest: Boolean(item.fixedTimeRest),
+        hasShift: Boolean(item.hasShift),
+        shiftId: item.shiftId || null,
+        shiftName: item.shiftName || '',
+        isRestDay: rest,
+        isWorkDay: !rest
+      };
+    }
+    return {
+      year: payload.data.year,
+      month: payload.data.month,
+      monthKey: `${payload.data.year}-${String(payload.data.month).padStart(2, '0')}`,
+      beginDate: payload.data.beginDate || null,
+      endDate: payload.data.endDate || null,
+      days: map
+    };
+  }
+
+  function isRestDayMeta(meta) {
+    if (!meta) return null;
+    return Boolean(meta.isRestDay);
+  }
+
   /** 日历格短工时，如 10.1 / 缺卡 / 空 */
-  function formatCalendarHours(record) {
-    if (!record) return '';
+  function formatCalendarHours(record, meta) {
+    const rest = isRestDayMeta(meta);
+    if (!record) return rest ? '' : '';
     if (record.status === 'ok' && record.workMs != null) {
       return (record.workMs / 3600000).toFixed(1);
     }
+    // 休息日无打卡属正常，不提示异常
+    if (rest) return '';
     if (record.status === 'no_checkout') return '缺下班';
     if (record.status === 'no_clock') return '无打卡';
     return '—';
   }
 
   /**
-   * 生成某月日历格（周一为一周起点）
-   * 每格：{ date|null, day, inMonth, record|null, level }
+   * 工作日按工时配色+表情；休息日灰色。
+   * 8h 😊绿 / 10h 😐黄 / 11h 😅 / 12h 😓 / 13h 🥵 / 14h+ 🤯
    */
-  function buildMonthCalendar(monthKey, records) {
+  function calendarStyle(record, meta) {
+    const rest = isRestDayMeta(meta);
+    if (rest === true) {
+      if (record && record.status === 'ok' && record.workMs != null) {
+        return { level: 'rest-ot', emoji: '', label: '休息日加班' };
+      }
+      return { level: 'rest', emoji: '', label: '休息日' };
+    }
+
+    if (!record) {
+      return {
+        level: rest === false ? 'work-empty' : 'none',
+        emoji: '',
+        label: rest === false ? '工作日' : '未知'
+      };
+    }
+    if (record.status !== 'ok' || record.workMs == null) {
+      return {
+        level: rest === false ? 'work-warn' : 'warn',
+        emoji: rest === false ? '😕' : '',
+        label: record.status
+      };
+    }
+
+    const h = record.workMs / 3600000;
+    if (h < 8) return { level: 'h-under', emoji: '😟', label: '不足8h' };
+    if (h < 9.5) return { level: 'h-8', emoji: '😊', label: '约8h' };
+    if (h < 10.5) return { level: 'h-10', emoji: '😐', label: '约10h' };
+    if (h < 11.5) return { level: 'h-11', emoji: '😅', label: '约11h' };
+    if (h < 12.5) return { level: 'h-12', emoji: '😓', label: '约12h' };
+    if (h < 13.5) return { level: 'h-13', emoji: '🥵', label: '约13h' };
+    return { level: 'h-14', emoji: '🤯', label: '≥14h' };
+  }
+
+  /**
+   * 生成某月日历格（周一为一周起点）
+   * dayMetaMap: { [date]: meta }
+   */
+  function buildMonthCalendar(monthKey, records, dayMetaMap) {
     const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
     if (!m) return [];
     const year = Number(m[1]);
@@ -173,6 +263,7 @@
     const startOffset = (first.getDay() + 6) % 7;
     const cells = [];
     const total = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+    const metaMap = dayMetaMap || {};
 
     for (let i = 0; i < total; i += 1) {
       const dayNum = i - startOffset + 1;
@@ -182,31 +273,33 @@
           day: null,
           inMonth: false,
           record: null,
-          level: 'empty'
+          meta: null,
+          level: 'empty',
+          emoji: '',
+          styleLabel: ''
         });
         continue;
       }
       const date = `${m[1]}-${m[2]}-${String(dayNum).padStart(2, '0')}`;
       const record = (records && records[date]) || null;
+      const meta = metaMap[date] || null;
+      const style = calendarStyle(record, meta);
       cells.push({
         date,
         day: dayNum,
         inMonth: true,
         record,
-        level: calendarLevel(record)
+        meta,
+        level: style.level,
+        emoji: style.emoji,
+        styleLabel: style.label
       });
     }
     return cells;
   }
 
-  function calendarLevel(record) {
-    if (!record) return 'none';
-    if (record.status !== 'ok' || record.workMs == null) return 'warn';
-    const h = record.workMs / 3600000;
-    if (h < 8) return 'low';
-    if (h < 10) return 'mid';
-    if (h < 11) return 'high';
-    return 'over';
+  function calendarLevel(record, meta) {
+    return calendarStyle(record, meta).level;
   }
 
   /**
@@ -279,7 +372,11 @@
     summarizeRecords,
     listMonthKeys,
     filterRecordsByMonth,
+    isMonthCalendarPayload,
+    extractDayMetaMap,
+    isRestDayMeta,
     formatCalendarHours,
+    calendarStyle,
     buildMonthCalendar,
     calendarLevel,
     mergeRecords,

@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'attendanceRecords';
 const DEBUG_KEY = 'debugInfo';
+const DAY_META_KEY = 'dayMeta';
 const VIEW_MONTH_KEY = 'viewMonthKey';
 const SELECTED_DATE_KEY = 'selectedDate';
 
@@ -38,6 +39,8 @@ const STATUS_TEXT = {
 
 /** @type {Record<string, any>} */
 let allRecords = {};
+/** @type {Record<string, any>} */
+let allDayMeta = {};
 /** @type {string} */
 let viewMonthKey = MokaHours.currentMonthKey();
 /** @type {string|null} */
@@ -47,10 +50,12 @@ async function load() {
   const stored = await chrome.storage.local.get([
     STORAGE_KEY,
     DEBUG_KEY,
+    DAY_META_KEY,
     VIEW_MONTH_KEY,
     SELECTED_DATE_KEY
   ]);
   allRecords = stored[STORAGE_KEY] || {};
+  allDayMeta = stored[DAY_META_KEY] || {};
   viewMonthKey = pickInitialMonth(allRecords, stored[VIEW_MONTH_KEY]);
   selectedDate = stored[SELECTED_DATE_KEY] || null;
   if (selectedDate && MokaHours.monthKeyFromDate(selectedDate) !== viewMonthKey) {
@@ -159,7 +164,11 @@ function renderMonthNav() {
 }
 
 function renderCalendar(monthRecords) {
-  const cells = MokaHours.buildMonthCalendar(viewMonthKey, monthRecords);
+  const cells = MokaHours.buildMonthCalendar(
+    viewMonthKey,
+    monthRecords,
+    allDayMeta
+  );
   calendarGridEl.innerHTML = '';
 
   for (const cell of cells) {
@@ -169,24 +178,34 @@ function renderCalendar(monthRecords) {
     if (!cell.inMonth) {
       btn.classList.add('out');
       btn.disabled = true;
-      btn.innerHTML = '<span class="cal-day"></span><span class="cal-hours"></span>';
+      btn.innerHTML =
+        '<span class="cal-day"></span><span class="cal-emoji"></span><span class="cal-hours"></span>';
       calendarGridEl.appendChild(btn);
       continue;
     }
 
     if (cell.date === selectedDate) btn.classList.add('selected');
-    const hoursText = MokaHours.formatCalendarHours(cell.record);
+    if (cell.meta && cell.meta.isRestDay) btn.classList.add('is-rest');
+    if (cell.meta && cell.meta.isWorkDay) btn.classList.add('is-work');
+
+    const hoursText = MokaHours.formatCalendarHours(cell.record, cell.meta);
     btn.innerHTML = `
       <span class="cal-day">${cell.day}</span>
+      <span class="cal-emoji">${cell.emoji || ''}</span>
       <span class="cal-hours">${hoursText ? escapeHtml(hoursText) : ''}</span>
     `;
-    btn.title = cell.record
-      ? `${cell.date} · ${
-          cell.record.status === 'ok'
-            ? MokaHours.formatDuration(cell.record.workMs)
-            : STATUS_TEXT[cell.record.status] || cell.record.status
-        }`
-      : `${cell.date} · 无记录`;
+    const parts = [cell.date];
+    if (cell.styleLabel) parts.push(cell.styleLabel);
+    if (cell.record && cell.record.status === 'ok') {
+      parts.push(MokaHours.formatDuration(cell.record.workMs));
+    } else if (cell.record) {
+      parts.push(STATUS_TEXT[cell.record.status] || cell.record.status);
+    } else if (cell.meta && cell.meta.isRestDay) {
+      parts.push('休息日');
+    } else {
+      parts.push('无记录');
+    }
+    btn.title = parts.join(' · ');
     btn.addEventListener('click', () => selectDate(cell.date));
     calendarGridEl.appendChild(btn);
   }
@@ -194,6 +213,7 @@ function renderCalendar(monthRecords) {
 
 function renderDayDetail() {
   const record = selectedDate ? allRecords[selectedDate] : null;
+  const meta = selectedDate ? allDayMeta[selectedDate] : null;
   if (!selectedDate) {
     dayDetailEmptyEl.classList.remove('hidden');
     dayDetailEmptyEl.textContent = '点击日历中的日期查看明细';
@@ -205,23 +225,44 @@ function renderDayDetail() {
   dayDetailEmptyEl.classList.add('hidden');
   dayDetailBodyEl.classList.remove('hidden');
 
+  const dayKind = meta
+    ? meta.isRestDay
+      ? '休息日'
+      : '工作日'
+    : '日期类型未知';
+  const style = MokaHours.calendarStyle(record, meta);
+
   if (!record) {
     dayDetailBodyEl.innerHTML = `
       <div class="item-top">
-        <span class="date">${selectedDate}</span>
-        <span class="hours bad">无记录</span>
+        <span class="date">${selectedDate}<span class="badge">${dayKind}</span></span>
+        <span class="hours">${style.emoji || ''} ${
+          meta && meta.isRestDay ? '休息' : '无记录'
+        }</span>
       </div>
-      <div class="meta">可在考勤页点开该日详情以采集数据</div>
+      <div class="meta">${
+        meta && meta.isRestDay
+          ? '休息日无打卡为正常'
+          : '可在考勤页点开该日详情以采集数据'
+      }</div>
     `;
     return;
   }
 
   const hoursClass =
-    record.status === 'ok' ? '' : record.status === 'no_checkout' ? 'warn' : 'bad';
+    record.status === 'ok'
+      ? ''
+      : meta && meta.isRestDay
+        ? ''
+        : record.status === 'no_checkout'
+          ? 'warn'
+          : 'bad';
   const hoursText =
     record.status === 'ok'
-      ? `${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）`
-      : STATUS_TEXT[record.status] || record.status;
+      ? `${style.emoji || ''} ${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）`
+      : meta && meta.isRestDay && record.status === 'no_clock'
+        ? '休息日无打卡'
+        : STATUS_TEXT[record.status] || record.status;
   const clockLine = [
     record.clockInTime ? `上班 ${shortTime(record.clockInTime)}` : '上班 —',
     record.clockOutTime ? `下班 ${shortTime(record.clockOutTime)}` : '下班 —'
@@ -229,7 +270,7 @@ function renderDayDetail() {
 
   dayDetailBodyEl.innerHTML = `
     <div class="item-top">
-      <span class="date">${record.date}${
+      <span class="date">${record.date}<span class="badge">${dayKind}</span>${
         record.shiftName
           ? `<span class="badge">${escapeHtml(record.shiftName)}</span>`
           : ''
@@ -238,7 +279,7 @@ function renderDayDetail() {
     </div>
     <div class="meta">${clockLine}${
       record.status === 'ok'
-        ? ` · 毛时长 ${MokaHours.formatDuration(record.rawMs)} − 午休1h`
+        ? ` · 毛时长 ${MokaHours.formatDuration(record.rawMs)} − 午休1h · ${style.label}`
         : ''
     }</div>
   `;
@@ -376,6 +417,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
       viewMonthKey = months[months.length - 1];
       chrome.storage.local.set({ [VIEW_MONTH_KEY]: viewMonthKey });
     }
+    renderAll();
+  }
+  if (changes[DAY_META_KEY]) {
+    allDayMeta = changes[DAY_META_KEY].newValue || {};
     renderAll();
   }
   if (changes[DEBUG_KEY]) renderStatus(changes[DEBUG_KEY].newValue || null);

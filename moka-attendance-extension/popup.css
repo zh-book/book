@@ -185,11 +185,11 @@ h1 {
 }
 
 .cal-cell {
-  min-height: 46px;
+  min-height: 52px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #f8fbfa;
-  padding: 4px 3px;
+  padding: 3px 2px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -220,6 +220,12 @@ h1 {
   line-height: 1.2;
 }
 
+.cal-emoji {
+  font-size: 12px;
+  line-height: 1;
+  min-height: 12px;
+}
+
 .cal-hours {
   font-size: 10px;
   font-weight: 700;
@@ -227,39 +233,104 @@ h1 {
   color: var(--accent);
 }
 
-.cal-cell.level-none .cal-hours {
+.cal-cell.level-none .cal-hours,
+.cal-cell.level-rest .cal-hours,
+.cal-cell.level-work-empty .cal-hours {
   color: transparent;
 }
 
-.cal-cell.level-low {
-  background: #ecfdf5;
+/* 休息日：灰底，无打卡正常 */
+.cal-cell.level-rest {
+  background: #f3f4f6;
+  color: #9ca3af;
+  border-color: #e5e7eb;
 }
 
-.cal-cell.level-mid {
-  background: #ccfbf1;
+.cal-cell.level-rest-ot {
+  background: #e5e7eb;
+  color: #6b7280;
 }
 
-.cal-cell.level-high {
-  background: #99f6e4;
+.cal-cell.level-work-empty {
+  background: #f8fbfa;
 }
 
-.cal-cell.level-over {
-  background: #5eead4;
-}
-
+.cal-cell.level-work-warn,
 .cal-cell.level-warn {
   background: #fff7ed;
 }
 
+.cal-cell.level-work-warn .cal-hours,
 .cal-cell.level-warn .cal-hours {
   color: var(--warn);
   font-size: 9px;
 }
 
+.cal-cell.level-h-under {
+  background: #fee2e2;
+}
+
+.cal-cell.level-h-under .cal-hours {
+  color: #b91c1c;
+}
+
+/* 8h 绿 + 笑脸 */
+.cal-cell.level-h-8 {
+  background: #bbf7d0;
+}
+
+.cal-cell.level-h-8 .cal-hours {
+  color: #166534;
+}
+
+/* 10h 黄 + 一般 */
+.cal-cell.level-h-10 {
+  background: #fef08a;
+}
+
+.cal-cell.level-h-10 .cal-hours {
+  color: #854d0e;
+}
+
+.cal-cell.level-h-11 {
+  background: #fdba74;
+}
+
+.cal-cell.level-h-11 .cal-hours {
+  color: #9a3412;
+}
+
+.cal-cell.level-h-12 {
+  background: #fb923c;
+  color: #7c2d12;
+}
+
+.cal-cell.level-h-12 .cal-hours {
+  color: #7c2d12;
+}
+
+.cal-cell.level-h-13 {
+  background: #f87171;
+  color: #7f1d1d;
+}
+
+.cal-cell.level-h-13 .cal-hours {
+  color: #7f1d1d;
+}
+
+.cal-cell.level-h-14 {
+  background: #ef4444;
+  color: #450a0a;
+}
+
+.cal-cell.level-h-14 .cal-hours {
+  color: #450a0a;
+}
+
 .cal-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px 8px;
   margin-top: 8px;
   color: var(--muted);
   font-size: 10px;
@@ -279,10 +350,13 @@ h1 {
   border: 1px solid var(--line);
 }
 
-.cal-legend .lg.low { background: #ecfdf5; }
-.cal-legend .lg.mid { background: #ccfbf1; }
-.cal-legend .lg.high { background: #99f6e4; }
-.cal-legend .lg.over { background: #5eead4; }
+.cal-legend .lg.rest { background: #f3f4f6; }
+.cal-legend .lg.h8 { background: #bbf7d0; }
+.cal-legend .lg.h10 { background: #fef08a; }
+.cal-legend .lg.h11 { background: #fdba74; }
+.cal-legend .lg.h12 { background: #fb923c; }
+.cal-legend .lg.h13 { background: #f87171; }
+.cal-legend .lg.h14 { background: #ef4444; }
 .cal-legend .lg.warn { background: #fff7ed; }
 
 .day-detail {

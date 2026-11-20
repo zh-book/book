@@ -4,6 +4,7 @@ const STORAGE_KEY = 'attendanceRecords';
 const DEBUG_KEY = 'debugInfo';
 const API_TEMPLATE_KEY = 'apiTemplate';
 const LOGIN_PROBE_KEY = 'loginProbe';
+const DAY_META_KEY = 'dayMeta';
 const TARGET_PATH = '/api/abs/attendance/myAttendance/v2/m/detail';
 const TARGET_URLS = [
   'https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail*'
@@ -33,6 +34,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       via: message.via || 'page'
     })
       .then((record) => sendResponse({ ok: true, record }))
+      .catch((err) =>
+        sendResponse({ ok: false, error: String(err && err.message) })
+      );
+    return true;
+  }
+
+  if (message.type === 'MONTH_CALENDAR') {
+    handleMonthCalendar(message.payload, {
+      url: message.url,
+      via: message.via || 'page'
+    })
+      .then((info) => sendResponse({ ok: true, info }))
       .catch((err) =>
         sendResponse({ ok: false, error: String(err && err.message) })
       );
@@ -139,6 +152,24 @@ async function handleAttendanceDetail(payload, meta) {
   await chrome.storage.local.set({ [STORAGE_KEY]: records });
   updateBadge(records);
   return record;
+}
+
+async function handleMonthCalendar(payload, meta) {
+  const extracted = self.MokaHours.extractDayMetaMap(payload);
+  if (!extracted) return null;
+
+  const stored = await chrome.storage.local.get(DAY_META_KEY);
+  const allMeta = stored[DAY_META_KEY] || {};
+  Object.assign(allMeta, extracted.days);
+  await chrome.storage.local.set({ [DAY_META_KEY]: allMeta });
+  await setDebug({
+    lastCalendarMonth: extracted.monthKey,
+    lastCalendarDays: Object.keys(extracted.days).length,
+    lastCalendarAt: Date.now(),
+    lastVia: meta.via || 'calendar',
+    lastUrl: meta.url || ''
+  });
+  return extracted;
 }
 
 function updateBadge(records) {

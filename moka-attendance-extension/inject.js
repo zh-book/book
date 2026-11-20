@@ -33,6 +33,15 @@
     }
   }
 
+  function isMokahrApiUrl(url) {
+    try {
+      const u = String(url || '');
+      return /mokahr\.com/i.test(u) && /\/api\//i.test(u);
+    } catch {
+      return false;
+    }
+  }
+
   function post(type, extra) {
     window.postMessage({ source: SOURCE, type, ...(extra || {}) }, '*');
   }
@@ -116,9 +125,25 @@
     post('ATTENDANCE_DETAIL', { payload, url: String(url || ''), via });
   }
 
+  function isMonthCalendarPayload(payload) {
+    return Boolean(
+      payload &&
+        payload.code === 200 &&
+        payload.data &&
+        typeof payload.data.year === 'number' &&
+        typeof payload.data.month === 'number' &&
+        Array.isArray(payload.data.days)
+    );
+  }
+
   function handleBody(text, url, via) {
     const json = tryParseJson(text);
-    if (json) publishDetail(json, url, via);
+    if (!json) return;
+    // 月历：区分工作日/休息日（type=2 / fixedTimeRest）
+    if (isMonthCalendarPayload(json)) {
+      post('MONTH_CALENDAR', { payload: json, url: String(url || ''), via });
+    }
+    if (isTargetUrl(url)) publishDetail(json, url, via);
   }
 
   /** 把任意 YYYY-MM-DD 替换成目标日（不依赖 sampleDate 是否仍写在模板里） */
@@ -273,7 +298,8 @@
     }
 
     const promise = originalFetch(...args);
-    if (isTargetUrl(url) && !batchQuiet) {
+    // detail 模板 + 月历工作日/休息日，都需要读响应
+    if (isMokahrApiUrl(url) && !batchQuiet) {
       promise
         .then((response) => {
           response
@@ -303,7 +329,8 @@
   };
 
   XMLHttpRequest.prototype.send = function (body) {
-    if (isTargetUrl(this.__mokaUrl) && !batchQuiet) {
+    const url = this.__mokaUrl;
+    if (isTargetUrl(url) && !batchQuiet) {
       const bodyStr =
         body == null
           ? null
@@ -314,20 +341,31 @@
               : String(body);
       rememberTemplate({
         method: this.__mokaMethod || 'GET',
-        url: this.__mokaUrl,
+        url,
         body: bodyStr,
         headers: this.__mokaHeaders || {}
       });
+    }
+    if (isMokahrApiUrl(url) && !batchQuiet) {
       this.addEventListener('load', function () {
         try {
           if (typeof this.response === 'object' && this.response !== null) {
-            publishDetail(this.response, this.__mokaUrl, 'xhr-json');
+            if (isMonthCalendarPayload(this.response)) {
+              post('MONTH_CALENDAR', {
+                payload: this.response,
+                url: String(url || ''),
+                via: 'xhr-json'
+              });
+            }
+            if (isTargetUrl(url)) {
+              publishDetail(this.response, url, 'xhr-json');
+            }
             return;
           }
         } catch {
           /* ignore */
         }
-        handleBody(this.responseText, this.__mokaUrl, 'xhr');
+        handleBody(this.responseText, url, 'xhr');
       });
     }
     return originalSend.call(this, body);

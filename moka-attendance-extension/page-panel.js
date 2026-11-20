@@ -279,8 +279,28 @@
       return;
     }
 
-    const days = daysInMonth(monthKey);
+    let days = daysInMonth(monthKey);
     if (!days.length) return;
+
+    // 有月历元数据时跳过休息日（type=2 / fixedTimeRest）
+    let skippedRest = 0;
+    try {
+      const stored = await chrome.storage.local.get('dayMeta');
+      const metaMap = stored.dayMeta || {};
+      const filtered = days.filter((d) => {
+        const meta = metaMap[d];
+        if (meta && meta.isRestDay) {
+          skippedRest += 1;
+          return false;
+        }
+        return true;
+      });
+      if (Object.keys(metaMap).some((d) => d.startsWith(monthKey))) {
+        days = filtered;
+      }
+    } catch {
+      /* ignore */
+    }
 
     running = true;
     abortFlag = false;
@@ -342,15 +362,16 @@
       const mismatchTip = mismatchCount
         ? `，日期不一致 ${mismatchCount}`
         : '';
+      const restTip = skippedRest ? `，跳过休息日 ${skippedRest}` : '';
       if (contextDead) {
         setMeta(
-          `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}`
+          `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}`
         );
       } else {
         setMeta(
           abortFlag
-            ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
-            : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
+            ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}。可打开插件弹窗查看日历。`
+            : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}。可打开插件弹窗查看日历。`
         );
       }
 

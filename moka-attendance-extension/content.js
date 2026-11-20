@@ -46,6 +46,15 @@
       });
     }
 
+    if (data.type === 'MONTH_CALENDAR' && data.payload) {
+      safeSendMessage({
+        type: 'MONTH_CALENDAR',
+        payload: data.payload,
+        url: data.url,
+        via: data.via || 'page'
+      });
+    }
+
     if (data.type === 'API_TEMPLATE' && data.template) {
       safeSendMessage({
         type: 'SAVE_API_TEMPLATE',

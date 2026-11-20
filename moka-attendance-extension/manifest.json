@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Moka 考勤工时助手",
-  "version": "1.5.2",
-  "description": "监控 Moka 考勤详情接口，按月批量拉取并统计每日/月均/总均工时",
+  "version": "1.6.0",
+  "description": "监控 Moka 考勤：区分工作日/休息日，按工时着色表情，支持按月批量拉取",
   "permissions": [
     "storage",
     "scripting",
