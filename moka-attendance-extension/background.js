@@ -11,6 +11,8 @@ const TARGET_URLS = [
 
 /** requestId -> { url, method, body, tabId } */
 const pending = new Map();
+/** 批量拉取期间不再二次 webRequest 回拉，避免错日覆盖 */
+let batchActive = false;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || !message.type) return;
@@ -67,11 +69,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'BATCH_START') {
+    batchActive = true;
+    setDebug({ batchActive: true, lastBatchMonth: message.monthKey, at: Date.now() }).then(
+      () => sendResponse({ ok: true })
+    );
+    return true;
+  }
+
+  if (message.type === 'BATCH_END') {
+    batchActive = false;
+    setDebug({ batchActive: false, at: Date.now() }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (message.type === 'BATCH_DONE') {
+    batchActive = false;
     setDebug({
+      batchActive: false,
       lastBatchMonth: message.monthKey,
       lastBatchOk: message.okCount,
       lastBatchFail: message.failCount,
+      lastBatchMismatch: message.mismatchCount || 0,
       lastBatchAborted: Boolean(message.aborted),
       lastBatchAt: Date.now()
     }).then(() => sendResponse({ ok: true }));
@@ -214,9 +233,13 @@ chrome.webRequest.onCompleted.addListener(
     };
     pending.delete(details.requestId);
 
+    // 批量期间页面已拿到响应体，禁止二次回拉（曾导致隔天错覆盖）
+    if (batchActive) return;
+
     // 页面钩子若已成功解析，短时间内不必重复回拉
     chrome.storage.local.get(DEBUG_KEY).then(async (stored) => {
       const debug = stored[DEBUG_KEY] || {};
+      if (debug.batchActive) return;
       if (
         debug.lastOk &&
         debug.lastVia &&

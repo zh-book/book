@@ -7,7 +7,13 @@
 
   const TARGET = '/api/abs/attendance/myAttendance/v2/m/detail';
   const SOURCE = 'MOKA_ATTENDANCE_EXT';
-  const DATE_RE = /\d{4}-\d{2}-\d{2}/g;
+  const DATE_KEYS = [
+    'attendanceDate',
+    'date',
+    'workDate',
+    'day',
+    'attendance_date'
+  ];
 
   const originalFetch = window.fetch.bind(window);
   const originalOpen = XMLHttpRequest.prototype.open;
@@ -16,6 +22,8 @@
 
   /** @type {null | {method:string,url:string,body:string|null,headers:Object,sampleDate:string|null}} */
   let lastTemplate = null;
+  /** 批量期间跳过对详情接口的二次挂钩处理，避免干扰 */
+  let batchQuiet = false;
 
   function isTargetUrl(url) {
     try {
@@ -75,7 +83,7 @@
     return out;
   }
 
-  function rememberTemplate( partial) {
+  function rememberTemplate(partial) {
     lastTemplate = {
       method: partial.method || 'GET',
       url: String(partial.url || ''),
@@ -93,6 +101,7 @@
         ? String(payload.data.attendanceDate)
         : null;
     if (date && lastTemplate) {
+      // 只更新 sampleDate 供展示；真正发请求时不再依赖它做字符串替换
       lastTemplate.sampleDate = date;
       post('API_TEMPLATE', { template: lastTemplate });
     } else if (date) {
@@ -112,6 +121,38 @@
     if (json) publishDetail(json, url, via);
   }
 
+  /** 把任意 YYYY-MM-DD 替换成目标日（不依赖 sampleDate 是否仍写在模板里） */
+  function replaceAllDates(text, date) {
+    return String(text || '').replace(/\d{4}-\d{2}-\d{2}/g, date);
+  }
+
+  function applyDateToJson(obj, date) {
+    if (!obj || typeof obj !== 'object') return obj;
+    let hit = false;
+    for (const key of DATE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        obj[key] = date;
+        hit = true;
+      }
+    }
+    // 常见嵌套
+    for (const [k, v] of Object.entries(obj)) {
+      if (v && typeof v === 'object') {
+        const before = JSON.stringify(v);
+        applyDateToJson(v, date);
+        if (JSON.stringify(v) !== before) hit = true;
+      } else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+        // 其它值为纯日期的字段一并替换
+        if (DATE_KEYS.includes(k) || /date|day/i.test(k)) {
+          obj[k] = date;
+          hit = true;
+        }
+      }
+    }
+    if (!hit) obj.attendanceDate = date;
+    return obj;
+  }
+
   function buildDayRequest(date, template) {
     const base =
       template ||
@@ -123,58 +164,44 @@
         sampleDate: null
       };
 
-    let url = base.url || `https://core.mokahr.com${TARGET}?bus=20`;
-    let body = base.body;
     const method = (base.method || 'GET').toUpperCase();
-    const sample = base.sampleDate;
+    let url = base.url || `https://core.mokahr.com${TARGET}?bus=20`;
+    let body = base.body == null ? null : String(base.body);
 
-    // URL 替换 / 补齐 attendanceDate
+    // URL：显式设置 attendanceDate，避免 sampleDate 与模板不同步导致隔天失败
     try {
       const u = new URL(url, location.origin);
-      if (sample && u.href.includes(sample)) {
-        u.href = u.href.split(sample).join(date);
+      // 先清掉旧日期参数，再写入目标日
+      for (const key of DATE_KEYS) {
+        if (u.searchParams.has(key)) u.searchParams.delete(key);
       }
-      // 常见查询参数
-      const dateKeys = ['attendanceDate', 'date', 'workDate', 'day', 'attendance_date'];
-      let hasDateParam = false;
-      for (const key of dateKeys) {
-        if (u.searchParams.has(key)) {
-          u.searchParams.set(key, date);
-          hasDateParam = true;
-        }
-      }
-      if (!hasDateParam && method === 'GET') {
-        u.searchParams.set('attendanceDate', date);
-      }
-      if (!u.searchParams.has('bus')) u.searchParams.set('bus', '20');
-      url = u.toString();
+      // path/query 里若还残留日期字符串，统一替换
+      let href = u.toString();
+      href = replaceAllDates(href, date);
+      const u2 = new URL(href);
+      u2.searchParams.set('attendanceDate', date);
+      if (!u2.searchParams.has('bus')) u2.searchParams.set('bus', '20');
+      url = u2.toString();
     } catch {
-      if (sample) url = url.split(sample).join(date);
+      url = replaceAllDates(url, date);
       if (!/[?&]attendanceDate=/.test(url)) {
         url += (url.includes('?') ? '&' : '?') + `attendanceDate=${encodeURIComponent(date)}`;
       }
     }
 
-    // Body 替换
-    if (body && sample) {
-      body = body.split(sample).join(date);
-    } else if (body) {
+    // Body：优先按 JSON 字段写入；否则全局替换日期字面量
+    if (body) {
       const json = tryParseJson(body);
       if (json && typeof json === 'object') {
-        const keys = ['attendanceDate', 'date', 'workDate', 'day', 'attendance_date'];
-        let hit = false;
-        for (const key of keys) {
-          if (key in json) {
-            json[key] = date;
-            hit = true;
-          }
-        }
-        if (!hit) json.attendanceDate = date;
+        applyDateToJson(json, date);
         body = JSON.stringify(json);
-      } else if (DATE_RE.test(body)) {
-        body = body.replace(DATE_RE, date);
+      } else {
+        body = replaceAllDates(body, date);
+        if (!/attendanceDate/.test(body) && method !== 'GET') {
+          body = JSON.stringify({ attendanceDate: date });
+        }
       }
-    } else if (method !== 'GET') {
+    } else if (method !== 'GET' && method !== 'HEAD') {
       body = JSON.stringify({ attendanceDate: date });
     }
 
@@ -202,10 +229,17 @@
     const response = await originalFetch(req.url, init);
     const text = await response.text();
     const json = tryParseJson(text);
+    const responseDate =
+      json && json.data && json.data.attendanceDate
+        ? String(json.data.attendanceDate)
+        : null;
     return {
       ok: response.ok,
       status: response.status,
       url: req.url,
+      requestDate: date,
+      responseDate,
+      dateMatched: !responseDate || responseDate === date,
       payload: json,
       raw: text.slice(0, 500)
     };
@@ -216,11 +250,11 @@
     const input = args[0];
     const init = args[1] || {};
     const url = typeof input === 'string' ? input : input && input.url;
-    let method = (init.method || (input && input.method) || 'GET').toUpperCase();
-    let body = init.body != null ? init.body : null;
-    let headers = headersToObject(init.headers || (input && input.headers));
+    const method = (init.method || (input && input.method) || 'GET').toUpperCase();
+    const body = init.body != null ? init.body : null;
+    const headers = headersToObject(init.headers || (input && input.headers));
 
-    if (isTargetUrl(url)) {
+    if (isTargetUrl(url) && !batchQuiet) {
       Promise.resolve(body)
         .then((b) => {
           const bodyStr =
@@ -239,7 +273,7 @@
     }
 
     const promise = originalFetch(...args);
-    if (isTargetUrl(url)) {
+    if (isTargetUrl(url) && !batchQuiet) {
       promise
         .then((response) => {
           response
@@ -269,7 +303,7 @@
   };
 
   XMLHttpRequest.prototype.send = function (body) {
-    if (isTargetUrl(this.__mokaUrl)) {
+    if (isTargetUrl(this.__mokaUrl) && !batchQuiet) {
       const bodyStr =
         body == null
           ? null
@@ -299,7 +333,6 @@
     return originalSend.call(this, body);
   };
 
-  // 供 content script 触发的页面内命令
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const data = event.data;
@@ -310,12 +343,26 @@
       return;
     }
 
+    if (data.type === 'BATCH_START') {
+      batchQuiet = true;
+      post('BATCH_FLAG', { active: true });
+      return;
+    }
+
+    if (data.type === 'BATCH_END') {
+      batchQuiet = false;
+      post('BATCH_FLAG', { active: false });
+      return;
+    }
+
     if (data.type === 'FETCH_DAY' && data.date) {
       const requestId = data.requestId;
+      // 批量时固定用「启动时」传入的 base 模板，避免 sampleDate 漂移
       fetchDay(data.date, data.template || lastTemplate)
         .then((result) => {
           post('FETCH_DAY_RESULT', { requestId, date: data.date, result });
-          if (result.payload) {
+          // 仅当响应日期与请求日一致（或无法判断）时才入库，防止错日覆盖
+          if (result.payload && result.dateMatched !== false) {
             publishDetail(result.payload, result.url, 'batch');
           }
         })
@@ -333,7 +380,6 @@
     }
   });
 
-  // 粗略探测登录痕迹（仅非 HttpOnly / 本地存储）
   function probeLogin() {
     const cookies = document.cookie || '';
     const storageKeys = [];

@@ -202,7 +202,7 @@
     setMeta(parts.join('\n'));
   }
 
-  function requestDay(date) {
+  function requestDayWithTemplate(date, baseTemplate) {
     const requestId = `${date}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     return new Promise((resolve) => {
       pending.set(requestId, resolve);
@@ -212,7 +212,8 @@
           type: 'FETCH_DAY',
           requestId,
           date,
-          template
+          // 固定批次开始时的模板，避免 sampleDate 漂移导致隔天替换失败
+          template: baseTemplate
         },
         '*'
       );
@@ -244,33 +245,58 @@
     if (btn) btn.disabled = true;
     if (stopBtn) stopBtn.hidden = false;
 
-    // 先向页面要一次最新模板
+    // 冻结本批次模板；通知 background / inject 进入批量模式
     window.postMessage({ source: SOURCE, type: 'GET_TEMPLATE' }, '*');
     await sleep(200);
+    const baseTemplate = template
+      ? JSON.parse(JSON.stringify(template))
+      : {
+          method: 'GET',
+          url: 'https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail?bus=20',
+          body: null,
+          headers: { Accept: 'application/json, text/plain, */*' },
+          sampleDate: null
+        };
+
+    window.postMessage({ source: SOURCE, type: 'BATCH_START' }, '*');
+    chrome.runtime.sendMessage({ type: 'BATCH_START', monthKey });
 
     let okCount = 0;
     let failCount = 0;
+    let mismatchCount = 0;
     for (let i = 0; i < days.length; i += 1) {
       if (abortFlag) break;
       const date = days[i];
       setMeta(`正在拉取 ${date}（${i + 1}/${days.length}）…`);
       setProgress(i, days.length);
 
-      const result = await requestDay(date);
-      if (result && result.ok && result.payload && result.payload.code === 200) {
+      const result = await requestDayWithTemplate(date, baseTemplate);
+      const matched =
+        result &&
+        result.ok &&
+        result.payload &&
+        result.payload.code === 200 &&
+        result.dateMatched !== false;
+      if (matched) {
         okCount += 1;
       } else {
         failCount += 1;
+        if (result && result.dateMatched === false) mismatchCount += 1;
       }
-      // 轻微限速，降低风控风险
-      await sleep(250);
+      await sleep(280);
     }
 
+    window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
+    chrome.runtime.sendMessage({ type: 'BATCH_END' });
+
     setProgress(days.length, days.length);
+    const mismatchTip = mismatchCount
+      ? `，日期不一致 ${mismatchCount}`
+      : '';
     setMeta(
       abortFlag
-        ? `已停止。成功 ${okCount}，失败/空 ${failCount}。可打开插件弹窗查看日历。`
-        : `完成。成功 ${okCount}，失败/空 ${failCount}。可打开插件弹窗查看日历。`
+        ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
+        : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}。可打开插件弹窗查看日历。`
     );
 
     running = false;
@@ -282,6 +308,7 @@
       monthKey,
       okCount,
       failCount,
+      mismatchCount,
       aborted: abortFlag
     });
   }
