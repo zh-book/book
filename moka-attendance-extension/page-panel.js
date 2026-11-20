@@ -6,6 +6,8 @@
 
   const SOURCE = 'MOKA_ATTENDANCE_EXT';
   const PANEL_ID = 'moka-hours-batch-panel';
+  /** 详情按日拉取并发数 */
+  const BATCH_CONCURRENCY = 3;
 
   function isAttendancePage() {
     try {
@@ -71,6 +73,13 @@
     return `${y}-${m}`;
   }
 
+  function shiftMonthKey(monthKey, delta) {
+    const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1 + delta, 1);
+    return monthInputValue(d);
+  }
+
   function daysInMonth(monthKey) {
     const m = monthKey.match(/^(\d{4})-(\d{2})$/);
     if (!m) return [];
@@ -100,7 +109,7 @@
           right: 20px;
           bottom: 20px;
           z-index: 2147483646;
-          width: 280px;
+          width: 300px;
           font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
           color: #134e4a;
           background: rgba(255,255,255,0.96);
@@ -132,17 +141,35 @@
         #${PANEL_ID} .bd { padding: 12px; }
         #${PANEL_ID} .row {
           display: flex;
-          gap: 8px;
+          gap: 6px;
           align-items: center;
           margin-bottom: 10px;
         }
-        #${PANEL_ID} label { font-size: 12px; color: #5f7f7b; min-width: 40px; }
+        #${PANEL_ID} label { font-size: 12px; color: #5f7f7b; min-width: 32px; }
         #${PANEL_ID} input[type="month"] {
           flex: 1;
+          min-width: 0;
           border: 1px solid #d7ebe7;
           border-radius: 8px;
           padding: 6px 8px;
           font-size: 13px;
+        }
+        #${PANEL_ID} .month-nav {
+          border: 1px solid #d7ebe7;
+          background: #f0faf8;
+          color: #0f766e;
+          border-radius: 8px;
+          width: 30px;
+          height: 30px;
+          font-size: 16px;
+          line-height: 1;
+          cursor: pointer;
+          flex-shrink: 0;
+        }
+        #${PANEL_ID} .month-nav:hover { background: #d9f3ee; }
+        #${PANEL_ID} .month-nav:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
         }
         #${PANEL_ID} .btn {
           width: 100%;
@@ -186,9 +213,11 @@
       <div class="bd">
         <div class="row">
           <label>月份</label>
+          <button type="button" class="month-nav" id="mokaPrevMonth" title="上一月">‹</button>
           <input type="month" id="mokaMonth" />
+          <button type="button" class="month-nav" id="mokaNextMonth" title="下一月">›</button>
         </div>
-        <button type="button" class="btn" id="mokaBatchBtn">批量拉取该月</button>
+        <button type="button" class="btn" id="mokaBatchBtn">批量拉取该月（3 路并行）</button>
         <button type="button" class="btn stop" id="mokaStopBtn" hidden>停止</button>
         <div class="bar"><i id="mokaBar"></i></div>
         <div class="meta" id="mokaMeta">正在检测登录态…</div>
@@ -202,12 +231,52 @@
     root.querySelector('#mokaPanelMin').addEventListener('click', () => {
       root.classList.toggle('mini');
     });
+    root.querySelector('#mokaPrevMonth').addEventListener('click', () => {
+      if (running) return;
+      const next = shiftMonthKey(monthEl.value || monthInputValue(new Date()), -1);
+      if (next) monthEl.value = next;
+    });
+    root.querySelector('#mokaNextMonth').addEventListener('click', () => {
+      if (running) return;
+      const next = shiftMonthKey(monthEl.value || monthInputValue(new Date()), 1);
+      if (next) monthEl.value = next;
+    });
     root.querySelector('#mokaBatchBtn').addEventListener('click', () => startBatch());
     root.querySelector('#mokaStopBtn').addEventListener('click', () => {
       abortFlag = true;
     });
 
     refreshMeta();
+  }
+
+  function setMonthNavDisabled(disabled) {
+    const prev = document.getElementById('mokaPrevMonth');
+    const next = document.getElementById('mokaNextMonth');
+    const month = document.getElementById('mokaMonth');
+    if (prev) prev.disabled = disabled;
+    if (next) next.disabled = disabled;
+    if (month) month.disabled = disabled;
+  }
+
+  /** 固定并发池拉取日期列表 */
+  async function runPool(items, concurrency, worker) {
+    let cursor = 0;
+    const runners = [];
+    const n = Math.max(1, Math.min(concurrency, items.length || 1));
+    for (let i = 0; i < n; i += 1) {
+      runners.push(
+        (async () => {
+          while (true) {
+            if (abortFlag || contextDead) return;
+            const idx = cursor;
+            cursor += 1;
+            if (idx >= items.length) return;
+            await worker(items[idx], idx);
+          }
+        })()
+      );
+    }
+    await Promise.all(runners);
   }
 
   function setMeta(text) {
@@ -388,6 +457,7 @@
     const stopBtn = document.getElementById('mokaStopBtn');
     if (btn) btn.disabled = true;
     if (stopBtn) stopBtn.hidden = false;
+    setMonthNavDisabled(true);
 
     let skippedRest = 0;
     let skippedFuture = 0;
@@ -425,8 +495,8 @@
 
       setMeta(
         calendarOk || filtered.useCalendar
-          ? `日历已就绪（${filtered.monthMetaCount} 天），待拉工作日 ${days.length}，跳过休息 ${skippedRest}，跳过未来 ${skippedFuture}`
-          : `无工作日历，待拉 ${days.length} 天（周末兜底跳过 ${skippedRest}）`
+          ? `日历已就绪（${filtered.monthMetaCount} 天），待拉工作日 ${days.length}，跳过休息 ${skippedRest}，跳过未来 ${skippedFuture}；${BATCH_CONCURRENCY} 路并行`
+          : `无工作日历，待拉 ${days.length} 天（周末兜底跳过 ${skippedRest}）；${BATCH_CONCURRENCY} 路并行`
       );
       await sleep(200);
 
@@ -449,16 +519,20 @@
       let okCount = 0;
       let failCount = 0;
       let mismatchCount = 0;
+      let doneCount = 0;
+      const inFlight = new Set();
+
       try {
-        for (let i = 0; i < days.length; i += 1) {
-          if (abortFlag || contextDead) break;
+        await runPool(days, BATCH_CONCURRENCY, async (date) => {
+          if (abortFlag || contextDead) return;
           if (!extensionAlive()) {
             contextDead = true;
-            break;
+            return;
           }
-          const date = days[i];
-          setMeta(`正在拉取 ${date}（${i + 1}/${days.length}）…`);
-          setProgress(i, days.length);
+          inFlight.add(date);
+          setMeta(
+            `并行拉取 ${[...inFlight].join('、')}（完成 ${doneCount}/${days.length}）…`
+          );
 
           const result = await requestDayWithTemplate(date, baseTemplate);
           const matched =
@@ -473,13 +547,17 @@
             failCount += 1;
             if (result && result.dateMatched === false) mismatchCount += 1;
           }
-          await sleep(280);
-        }
+          inFlight.delete(date);
+          doneCount += 1;
+          setProgress(doneCount, days.length);
+          // 轻微限流，避免三路齐发把接口打满
+          await sleep(80);
+        });
       } finally {
         window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
         await safeSendMessage({ type: 'BATCH_END' });
 
-        setProgress(days.length, days.length);
+        setProgress(doneCount || days.length, days.length || 1);
         const mismatchTip = mismatchCount
           ? `，日期不一致 ${mismatchCount}`
           : '';
@@ -494,7 +572,7 @@
           setMeta(
             abortFlag
               ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}。可打开插件弹窗查看日历。`
-              : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}。可打开插件弹窗查看日历。`
+              : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}（${BATCH_CONCURRENCY} 路并行）。可打开插件弹窗查看日历。`
           );
         }
 
@@ -505,6 +583,7 @@
           failCount,
           mismatchCount,
           calendarOk,
+          concurrency: BATCH_CONCURRENCY,
           aborted: abortFlag || contextDead
         });
       }
@@ -518,6 +597,7 @@
       running = false;
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.hidden = true;
+      setMonthNavDisabled(false);
     }
   }
 
