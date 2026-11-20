@@ -18,6 +18,9 @@ const allAvgHoursEl = document.getElementById('allAvgHours');
 const listEl = document.getElementById('list');
 const emptyHintEl = document.getElementById('emptyHint');
 const clearBtn = document.getElementById('clearBtn');
+const exportBtn = document.getElementById('exportBtn');
+const importBtn = document.getElementById('importBtn');
+const importFile = document.getElementById('importFile');
 const statusLineEl = document.getElementById('statusLine');
 const statusMetaEl = document.getElementById('statusMeta');
 
@@ -227,6 +230,46 @@ clearBtn.addEventListener('click', async () => {
   allRecords = {};
   await chrome.storage.local.set({ [STORAGE_KEY]: {} });
   renderAll();
+});
+
+exportBtn.addEventListener('click', () => {
+  const payload = MokaHours.buildExportPayload(allRecords);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `moka-attendance-${stamp}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+importBtn.addEventListener('click', () => importFile.click());
+
+importFile.addEventListener('change', async () => {
+  const file = importFile.files && importFile.files[0];
+  importFile.value = '';
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const incoming = MokaHours.parseImportPayload(text);
+    const result = MokaHours.mergeRecords(allRecords, incoming);
+    allRecords = result.merged;
+    await chrome.storage.local.set({ [STORAGE_KEY]: allRecords });
+    const months = MokaHours.listMonthKeys(allRecords);
+    if (months.length) {
+      viewMonthKey = months[months.length - 1];
+      await chrome.storage.local.set({ [VIEW_MONTH_KEY]: viewMonthKey });
+    }
+    renderAll();
+    alert(
+      `导入完成：新增 ${result.added}，更新 ${result.updated}，跳过 ${result.skipped}`
+    );
+  } catch (err) {
+    alert(`导入失败：${err && err.message ? err.message : err}`);
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {

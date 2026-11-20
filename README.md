@@ -27,4 +27,9 @@ Chrome 加载扩展时选择：
 /Users/bookz/Desktop/bookz/moka-attendance-extension
 ```
 
+## 与旧插件共用数据
+
+- **同一扩展点「重新加载」**：数据自动保留
+- **已经变成两个扩展**：旧弹窗点「导出」→ 新弹窗点「导入」合并
+
 详细说明见 [`moka-attendance-extension/README.md`](./moka-attendance-extension/README.md)。

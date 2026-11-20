@@ -147,6 +147,63 @@
     return out;
   }
 
+  /**
+   * 合并考勤记录：同日期取 updatedAt 更新的；缺 updatedAt 时导入侧覆盖。
+   * 返回 { merged, added, updated, skipped }
+   */
+  function mergeRecords(existing, incoming) {
+    const merged = { ...(existing || {}) };
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    for (const [date, rec] of Object.entries(incoming || {})) {
+      if (!rec || !date) continue;
+      const prev = merged[date];
+      if (!prev) {
+        merged[date] = rec;
+        added += 1;
+        continue;
+      }
+      const prevTs = Number(prev.updatedAt) || 0;
+      const nextTs = Number(rec.updatedAt) || 0;
+      if (nextTs >= prevTs) {
+        merged[date] = rec;
+        updated += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { merged, added, updated, skipped };
+  }
+
+  function buildExportPayload(records) {
+    return {
+      app: 'moka-attendance-extension',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      records: records || {}
+    };
+  }
+
+  function parseImportPayload(raw) {
+    let data = raw;
+    if (typeof raw === 'string') {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        throw new Error('不是合法 JSON');
+      }
+    }
+    if (!data || typeof data !== 'object') throw new Error('导入内容为空');
+    // 兼容直接导出 { date: record } 或包装格式
+    if (data.records && typeof data.records === 'object') return data.records;
+    const keys = Object.keys(data);
+    if (keys.length && keys.every((k) => /^\d{4}-\d{2}-\d{2}$/.test(k))) {
+      return data;
+    }
+    throw new Error('无法识别的备份格式');
+  }
+
   root.MokaHours = {
     LUNCH_MS,
     parseClockTime,
@@ -159,6 +216,9 @@
     currentMonthKey,
     summarizeRecords,
     listMonthKeys,
-    filterRecordsByMonth
+    filterRecordsByMonth,
+    mergeRecords,
+    buildExportPayload,
+    parseImportPayload
   };
 })(typeof self !== 'undefined' ? self : window);

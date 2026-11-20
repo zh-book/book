@@ -46,6 +46,24 @@ https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail?bus=20
 - 毛时长：11 小时 05 分
 - 扣午休 1 小时后：**10 小时 05 分**（约 10.08h）
 
+## 与旧版插件共用数据
+
+Chrome 按 **扩展 ID** 隔离存储。两种情况：
+
+### 1）推荐：同一扩展上点「重新加载」
+
+不要「移除」旧扩展。在 `chrome://extensions/` 对原来那一项点 **重新加载**（可先把目录换成 `/Users/bookz/Desktop/bookz/moka-attendance-extension`），**ID 不变，数据自动还在**。
+
+### 2）已经装成两个扩展 / 换目录后是新 ID
+
+用弹窗里的 **导出 / 导入**：
+
+1. 打开旧插件弹窗 → **导出**，得到 `moka-attendance-YYYY-MM-DD.json`
+2. 打开新插件弹窗 → **导入**，选择该文件  
+3. 按日期合并：同日取较新的 `updatedAt`
+
+从 v1.3.0 起，`manifest.json` 带有固定 `key`，之后只要用同一份代码加载，换文件夹也会尽量保持同一扩展 ID。
+
 ## 说明
 
 - 数据仅保存在本机 `chrome.storage.local`，不会上传

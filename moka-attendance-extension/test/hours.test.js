@@ -109,4 +109,20 @@ assert(
   '总日均错误'
 );
 
+const existing = {
+  '2026-08-06': { date: '2026-08-06', status: 'ok', workMs: 1, updatedAt: 10 }
+};
+const incoming = {
+  '2026-08-06': { date: '2026-08-06', status: 'ok', workMs: 2, updatedAt: 20 },
+  '2026-08-07': { date: '2026-08-07', status: 'ok', workMs: 3, updatedAt: 1 }
+};
+const merged = MokaHours.mergeRecords(existing, incoming);
+assert(merged.added === 1 && merged.updated === 1, '合并计数错误');
+assert(merged.merged['2026-08-06'].workMs === 2, '应采用较新记录');
+
+const exportPayload = MokaHours.buildExportPayload(existing);
+assert(exportPayload.app === 'moka-attendance-extension', '导出包装错误');
+const parsed = MokaHours.parseImportPayload(JSON.stringify(exportPayload));
+assert(parsed['2026-08-06'].workMs === 1, '导入解析错误');
+
 console.log('All hours tests passed.');

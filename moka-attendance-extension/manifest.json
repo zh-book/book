@@ -1,9 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Moka 考勤工时助手",
-  "version": "1.2.0",
-  "description": "监控 Moka 考勤详情接口，按打卡时间减去午休 1 小时统计每日/每月/总平均工时",
-  "permissions": ["storage", "scripting", "webRequest", "tabs"],
+  "version": "1.3.0",
+  "description": "监控 Moka 考勤详情接口，按打卡时间减去午休 1 小时统计工时；支持按月查看与数据导入导出",
+  "permissions": [
+    "storage",
+    "scripting",
+    "webRequest",
+    "tabs"
+  ],
   "host_permissions": [
     "https://core.mokahr.com/*",
     "https://*.mokahr.com/*",
@@ -19,7 +24,9 @@
         "http://*.mokahr.com/*",
         "https://core.mokahr.com/*"
       ],
-      "js": ["inject.js"],
+      "js": [
+        "inject.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
@@ -30,7 +37,9 @@
         "http://*.mokahr.com/*",
         "https://core.mokahr.com/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start",
       "all_frames": true,
       "world": "ISOLATED"
@@ -50,5 +59,6 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAySBcziNqFdaTseUc3BzJKPY2hQqf16mlkl3SFsJPo00k6VZNP0/ewjHviPt+/4m1/ZhPc6QuB4CFbvVwK5x91e7QfFzfn9CfQyIl2nd/aCBdLkA1DXSFTvQN32z/0+AYdM+6kFa8J6S7P7KbThtAeXCbdf6pKKIDFjGCZLf2ujToVbD9j/BCFI2VsM4pOovgr0Sxx1FFkzO6y7FClORunW7tcRr0OObbe45L6Fmu/HeKocn5Qvbkm6eH+34187Pq+iLAeBaPCD6hQxk7UY5rJ4uJ7ZsmuraE1iXM90kMyIxzPPseWapxIiAMVOSg1OVlwckVF38Q/wtYtPIE4B33iwIDAQAB"
 }

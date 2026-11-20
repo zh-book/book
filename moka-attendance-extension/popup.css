@@ -48,6 +48,13 @@ h1 {
   font-size: 12px;
 }
 
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .ghost {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.7);
