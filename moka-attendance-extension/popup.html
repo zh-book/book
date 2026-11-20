@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Moka 考勤工时</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div>
+        <h1>Moka 考勤工时</h1>
+        <p class="sub">打卡时长 − 午休 1 小时</p>
+      </div>
+      <div class="header-actions">
+        <button id="exportBtn" type="button" class="ghost" title="导出全部工时数据">
+          导出
+        </button>
+        <button id="importBtn" type="button" class="ghost" title="从旧插件备份导入并合并">
+          导入
+        </button>
+        <button id="clearBtn" type="button" class="ghost" title="清空本地记录">
+          清空
+        </button>
+        <input
+          id="importFile"
+          type="file"
+          accept="application/json,.json"
+          hidden
+        />
+      </div>
+    </header>
+
+    <section class="month-nav" id="monthNav">
+      <button id="prevMonthBtn" type="button" class="nav-btn" aria-label="上一月">
+        ‹
+      </button>
+      <div class="month-center">
+        <strong id="monthLabel">—</strong>
+        <span id="monthRangeHint" class="month-hint"></span>
+      </div>
+      <button id="nextMonthBtn" type="button" class="nav-btn" aria-label="下一月">
+        ›
+      </button>
+    </section>
+
+    <section class="summary" id="monthSummary" aria-label="本月汇总">
+      <div class="stat">
+        <span class="label">本月天数</span>
+        <strong id="monthDayCount">0</strong>
+      </div>
+      <div class="stat">
+        <span class="label">本月合计</span>
+        <strong id="monthTotalHours">—</strong>
+      </div>
+      <div class="stat">
+        <span class="label">本月日均</span>
+        <strong id="monthAvgHours">—</strong>
+      </div>
+    </section>
+
+    <section class="calendar-wrap" aria-label="本月日历">
+      <div class="cal-weekdays">
+        <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+      </div>
+      <div class="cal-grid" id="calendarGrid"></div>
+    </section>
+
+    <section class="day-detail" id="dayDetail">
+      <div class="day-detail-empty" id="dayDetailEmpty">点击日历中的日期查看明细</div>
+      <div class="day-detail-body hidden" id="dayDetailBody"></div>
+    </section>
+
+    <section class="summary overall" id="overallSummary" aria-label="全部汇总">
+      <div class="stat">
+        <span class="label">总天数</span>
+        <strong id="allDayCount">0</strong>
+      </div>
+      <div class="stat">
+        <span class="label">总合计</span>
+        <strong id="allTotalHours">—</strong>
+      </div>
+      <div class="stat">
+        <span class="label">总日均</span>
+        <strong id="allAvgHours">—</strong>
+      </div>
+    </section>
+
+    <section class="status collapsed" id="statusBox">
+      <button type="button" class="status-toggle" id="statusToggle">
+        <span class="status-title">监听状态</span>
+        <span class="status-line" id="statusLine">尚未检测到接口请求</span>
+      </button>
+      <div class="status-meta" id="statusMeta">
+        安装/更新后请刷新考勤页，再点开某天详情。
+      </div>
+    </section>
+
+    <section class="hint" id="emptyHint">
+      打开 Moka 考勤详情页并浏览日期后，本插件会自动捕获接口并计算工时。
+    </section>
+
+    <script src="hours.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
