@@ -135,7 +135,7 @@ async function setDebug(patch) {
 }
 
 async function handleAttendanceDetail(payload, meta) {
-  const record = self.MokaHours.extractDayRecord(payload);
+  let record = self.MokaHours.extractDayRecord(payload);
   await setDebug({
     lastUrl: meta.url || '',
     lastVia: meta.via || '',
@@ -146,7 +146,16 @@ async function handleAttendanceDetail(payload, meta) {
   });
   if (!record) return null;
 
-  const stored = await chrome.storage.local.get(STORAGE_KEY);
+  const stored = await chrome.storage.local.get([STORAGE_KEY, DAY_META_KEY]);
+  const dayMeta = (stored[DAY_META_KEY] || {})[record.date] || null;
+  // 休息日无打卡属正常：勿登记成「无打卡」
+  if (
+    (record.status === 'no_clock' || record.status === 'incomplete') &&
+    self.MokaHours.resolveIsRestDay(record.date, dayMeta)
+  ) {
+    record = { ...record, status: 'rest' };
+  }
+
   const records = stored[STORAGE_KEY] || {};
   records[record.date] = record;
   await chrome.storage.local.set({ [STORAGE_KEY]: records });
@@ -158,13 +167,25 @@ async function handleMonthCalendar(payload, meta) {
   const extracted = self.MokaHours.extractDayMetaMap(payload);
   if (!extracted) return null;
 
-  const stored = await chrome.storage.local.get(DAY_META_KEY);
+  const stored = await chrome.storage.local.get([DAY_META_KEY, STORAGE_KEY]);
   const allMeta = stored[DAY_META_KEY] || {};
   Object.assign(allMeta, extracted.days);
   await chrome.storage.local.set({ [DAY_META_KEY]: allMeta });
+
+  // 月历到位后，把已存的休息日「无打卡」改成 rest
+  const norm = self.MokaHours.normalizeRestRecords(
+    stored[STORAGE_KEY] || {},
+    allMeta
+  );
+  if (norm.changed) {
+    await chrome.storage.local.set({ [STORAGE_KEY]: norm.records });
+    updateBadge(norm.records);
+  }
+
   await setDebug({
     lastCalendarMonth: extracted.monthKey,
     lastCalendarDays: Object.keys(extracted.days).length,
+    lastCalendarRestFixed: norm.changed,
     lastCalendarAt: Date.now(),
     lastVia: meta.via || 'calendar',
     lastUrl: meta.url || ''

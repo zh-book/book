@@ -147,16 +147,55 @@
     return out;
   }
 
+  function todayDateStr() {
+    const n = new Date();
+    const p = (x) => String(x).padStart(2, '0');
+    return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+  }
+
+  function isWeekendDate(dateStr) {
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+    const d = new Date(`${dateStr}T12:00:00`);
+    const w = d.getDay();
+    return w === 0 || w === 6;
+  }
+
   /** 是否月历接口响应：data.year/month/days */
   function isMonthCalendarPayload(payload) {
-    return Boolean(
-      payload &&
-        payload.code === 200 &&
-        payload.data &&
-        typeof payload.data.year === 'number' &&
-        typeof payload.data.month === 'number' &&
-        Array.isArray(payload.data.days)
+    if (!payload || typeof payload !== 'object') return false;
+    if (payload.code != null && Number(payload.code) !== 200) return false;
+    const data = payload.data || payload;
+    if (!data || typeof data !== 'object') return false;
+    const year = Number(data.year);
+    const month = Number(data.month);
+    return (
+      Number.isFinite(year) &&
+      Number.isFinite(month) &&
+      month >= 1 &&
+      month <= 12 &&
+      Array.isArray(data.days) &&
+      data.days.length > 0 &&
+      data.days[0] &&
+      typeof data.days[0].day === 'string'
     );
+  }
+
+  function judgeRestFromItem(item) {
+    if (!item) return false;
+    const typeNum = Number(item.type);
+    // type=2 休息日；fixedTimeRest 也表示休息；type=1 明确为工作日（含周日调休）
+    if (typeNum === 1) return false;
+    if (typeNum === 2) return true;
+    if (item.fixedTimeRest === true || item.fixedTimeRest === 'true') return true;
+    // 无班次且非工作日标记时，按休息处理
+    if (
+      (item.shiftId == null || item.shiftId === '') &&
+      item.hasShift === false &&
+      item.workDay === false
+    ) {
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -165,30 +204,43 @@
    */
   function extractDayMetaMap(payload) {
     if (!isMonthCalendarPayload(payload)) return null;
+    const data = payload.data || payload;
     const map = {};
-    for (const item of payload.data.days) {
+    for (const item of data.days) {
       if (!item || !item.day) continue;
-      const rest = item.type === 2 || item.fixedTimeRest === true;
+      const rest = judgeRestFromItem(item);
       map[item.day] = {
         date: item.day,
         type: item.type,
         workDay: Boolean(item.workDay),
         fixedTimeRest: Boolean(item.fixedTimeRest),
         hasShift: Boolean(item.hasShift),
-        shiftId: item.shiftId || null,
+        shiftId: item.shiftId == null || item.shiftId === '' ? null : item.shiftId,
         shiftName: item.shiftName || '',
         isRestDay: rest,
-        isWorkDay: !rest
+        isWorkDay: !rest,
+        source: 'calendar'
       };
     }
+    const year = Number(data.year);
+    const month = Number(data.month);
     return {
-      year: payload.data.year,
-      month: payload.data.month,
-      monthKey: `${payload.data.year}-${String(payload.data.month).padStart(2, '0')}`,
-      beginDate: payload.data.beginDate || null,
-      endDate: payload.data.endDate || null,
+      year,
+      month,
+      monthKey: `${year}-${String(month).padStart(2, '0')}`,
+      beginDate: data.beginDate || null,
+      endDate: data.endDate || null,
       days: map
     };
+  }
+
+  /**
+   * 休息日判定：优先月历；无月历时周末兜底。
+   * 月历标记 type=1 的周日调休仍算工作日。
+   */
+  function resolveIsRestDay(dateStr, meta) {
+    if (meta && typeof meta.isRestDay === 'boolean') return meta.isRestDay;
+    return isWeekendDate(dateStr);
   }
 
   function isRestDayMeta(meta) {
@@ -197,14 +249,15 @@
   }
 
   /** 日历格短工时，如 10.1 / 缺卡 / 空 */
-  function formatCalendarHours(record, meta) {
-    const rest = isRestDayMeta(meta);
-    if (!record) return rest ? '' : '';
+  function formatCalendarHours(record, meta, dateStr) {
+    const date = dateStr || (record && record.date) || (meta && meta.date);
+    const rest = resolveIsRestDay(date, meta);
+    if (!record) return '';
     if (record.status === 'ok' && record.workMs != null) {
       return (record.workMs / 3600000).toFixed(1);
     }
     // 休息日无打卡属正常，不提示异常
-    if (rest) return '';
+    if (rest || record.status === 'rest') return '';
     if (record.status === 'no_checkout') return '缺下班';
     if (record.status === 'no_clock') return '无打卡';
     return '—';
@@ -214,9 +267,11 @@
    * 工作日按工时配色+表情；休息日灰色。
    * 8h 😊绿 / 10h 😐黄 / 11h 😅 / 12h 😓 / 13h 🥵 / 14h+ 🤯
    */
-  function calendarStyle(record, meta) {
-    const rest = isRestDayMeta(meta);
-    if (rest === true) {
+  function calendarStyle(record, meta, dateStr) {
+    const date = dateStr || (record && record.date) || (meta && meta.date);
+    const rest = resolveIsRestDay(date, meta);
+
+    if (rest || (record && record.status === 'rest')) {
       if (record && record.status === 'ok' && record.workMs != null) {
         return { level: 'rest-ot', emoji: '', label: '休息日加班' };
       }
@@ -224,16 +279,12 @@
     }
 
     if (!record) {
-      return {
-        level: rest === false ? 'work-empty' : 'none',
-        emoji: '',
-        label: rest === false ? '工作日' : '未知'
-      };
+      return { level: 'work-empty', emoji: '', label: '工作日' };
     }
     if (record.status !== 'ok' || record.workMs == null) {
       return {
-        level: rest === false ? 'work-warn' : 'warn',
-        emoji: rest === false ? '😕' : '',
+        level: 'work-warn',
+        emoji: '😕',
         label: record.status
       };
     }
@@ -283,13 +334,14 @@
       const date = `${m[1]}-${m[2]}-${String(dayNum).padStart(2, '0')}`;
       const record = (records && records[date]) || null;
       const meta = metaMap[date] || null;
-      const style = calendarStyle(record, meta);
+      const style = calendarStyle(record, meta, date);
       cells.push({
         date,
         day: dayNum,
         inMonth: true,
         record,
         meta,
+        isRestDay: resolveIsRestDay(date, meta),
         level: style.level,
         emoji: style.emoji,
         styleLabel: style.label
@@ -298,8 +350,24 @@
     return cells;
   }
 
-  function calendarLevel(record, meta) {
-    return calendarStyle(record, meta).level;
+  function calendarLevel(record, meta, dateStr) {
+    return calendarStyle(record, meta, dateStr).level;
+  }
+
+  /** 将已存的「无打卡」在确认为休息日后改成 rest */
+  function normalizeRestRecords(records, dayMetaMap) {
+    const next = { ...(records || {}) };
+    let changed = 0;
+    for (const [date, rec] of Object.entries(next)) {
+      if (!rec) continue;
+      if (rec.status !== 'no_clock' && rec.status !== 'incomplete') continue;
+      const meta = (dayMetaMap && dayMetaMap[date]) || null;
+      if (resolveIsRestDay(date, meta)) {
+        next[date] = { ...rec, status: 'rest' };
+        changed += 1;
+      }
+    }
+    return { records: next, changed };
   }
 
   /**
@@ -369,16 +437,21 @@
     shiftMonthKey,
     formatMonthLabel,
     currentMonthKey,
+    todayDateStr,
+    isWeekendDate,
     summarizeRecords,
     listMonthKeys,
     filterRecordsByMonth,
     isMonthCalendarPayload,
     extractDayMetaMap,
+    judgeRestFromItem,
+    resolveIsRestDay,
     isRestDayMeta,
     formatCalendarHours,
     calendarStyle,
     buildMonthCalendar,
     calendarLevel,
+    normalizeRestRecords,
     mergeRecords,
     buildExportPayload,
     parseImportPayload

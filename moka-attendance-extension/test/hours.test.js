@@ -155,14 +155,63 @@ assert(extracted.days['2026-12-05'].isRestDay, '12-05 应为休息日');
 
 const restStyle = MokaHours.calendarStyle(
   { status: 'no_clock', workMs: null },
-  extracted.days['2026-12-05']
+  extracted.days['2026-12-05'],
+  '2026-12-05'
 );
 assert(restStyle.level === 'rest', '休息日无打卡应为 rest');
 
 const h8 = MokaHours.calendarStyle(
   { status: 'ok', workMs: 8 * 3600000 },
-  extracted.days['2026-12-01']
+  extracted.days['2026-12-01'],
+  '2026-12-01'
 );
 assert(h8.level === 'h-8' && h8.emoji === '😊', '8h 应为绿色笑脸');
+
+// type 可能是字符串 "2"
+const stringTypePayload = {
+  code: '200',
+  data: {
+    year: '2026',
+    month: '12',
+    days: [{ day: '2026-12-06', type: '2', fixedTimeRest: 'true', workDay: false }]
+  }
+};
+assert(MokaHours.isMonthCalendarPayload(stringTypePayload), '应识别字符串 code/year 月历');
+const extracted2 = MokaHours.extractDayMetaMap(stringTypePayload);
+assert(extracted2.days['2026-12-06'].isRestDay, '字符串 type=2 应为休息日');
+
+// 无月历时周末兜底（2026-12-05 周六、2026-12-06 周日、2026-12-07 周一）
+assert(MokaHours.resolveIsRestDay('2026-12-05', null), '无元数据时周六应为休息日');
+assert(MokaHours.resolveIsRestDay('2026-12-06', null), '无元数据时周日应为休息日');
+assert(!MokaHours.resolveIsRestDay('2026-12-07', null), '无元数据时周一不应为休息日');
+// 周日调休上班：月历 type=1 优先于周末
+assert(
+  !MokaHours.resolveIsRestDay('2026-12-06', {
+    isRestDay: false,
+    isWorkDay: true,
+    type: 1
+  }),
+  '月历标记工作日时周末也应算工作日'
+);
+
+const normalized = MokaHours.normalizeRestRecords(
+  {
+    '2026-12-05': { date: '2026-12-05', status: 'no_clock', workMs: null },
+    '2026-12-01': { date: '2026-12-01', status: 'no_clock', workMs: null }
+  },
+  extracted.days
+);
+assert(normalized.changed === 1, '应只纠偏休息日无打卡');
+assert(normalized.records['2026-12-05'].status === 'rest', '休息日应改为 rest');
+assert(normalized.records['2026-12-01'].status === 'no_clock', '工作日无打卡保持');
+
+assert(
+  MokaHours.formatCalendarHours(
+    { status: 'no_clock', workMs: null },
+    extracted.days['2026-12-05'],
+    '2026-12-05'
+  ) === '',
+  '休息日日历格不应显示「无打卡」'
+);
 
 console.log('All hours tests passed.');

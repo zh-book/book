@@ -282,24 +282,74 @@
     let days = daysInMonth(monthKey);
     if (!days.length) return;
 
-    // 有月历元数据时跳过休息日（type=2 / fixedTimeRest）
+    // 不拉今天之后；休息日（月历 type=2 / fixedTimeRest，无月历时周末兜底）跳过
     let skippedRest = 0;
+    let skippedFuture = 0;
+    const today =
+      (typeof MokaHours !== 'undefined' && MokaHours.todayDateStr
+        ? MokaHours.todayDateStr()
+        : (() => {
+            const n = new Date();
+            const p = (x) => String(x).padStart(2, '0');
+            return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+          })());
+
     try {
-      const stored = await chrome.storage.local.get('dayMeta');
+      const stored = await chrome.storage.local.get(['dayMeta', 'attendanceRecords']);
       const metaMap = stored.dayMeta || {};
-      const filtered = days.filter((d) => {
-        const meta = metaMap[d];
-        if (meta && meta.isRestDay) {
+      const records = { ...(stored.attendanceRecords || {}) };
+      let recordsDirty = false;
+
+      days = days.filter((d) => {
+        if (d > today) {
+          skippedFuture += 1;
+          return false;
+        }
+        const meta = metaMap[d] || null;
+        const isRest =
+          typeof MokaHours !== 'undefined' && MokaHours.resolveIsRestDay
+            ? MokaHours.resolveIsRestDay(d, meta)
+            : meta && meta.isRestDay === true
+              ? true
+              : (() => {
+                  const w = new Date(`${d}T12:00:00`).getDay();
+                  return w === 0 || w === 6;
+                })();
+        if (isRest) {
           skippedRest += 1;
+          // 跳过拉取时写入 rest，避免界面仍显示「无打卡」
+          const prev = records[d];
+          if (!prev || prev.status === 'no_clock' || prev.status === 'incomplete') {
+            records[d] = {
+              date: d,
+              employeeId: (prev && prev.employeeId) || null,
+              shiftName: (prev && prev.shiftName) || (meta && meta.shiftName) || '',
+              clockInTime: null,
+              clockOutTime: null,
+              rawMs: null,
+              workMs: null,
+              lunchMs: 3600000,
+              status: 'rest',
+              updatedAt: Date.now()
+            };
+            recordsDirty = true;
+          }
           return false;
         }
         return true;
       });
-      if (Object.keys(metaMap).some((d) => d.startsWith(monthKey))) {
-        days = filtered;
+
+      if (recordsDirty) {
+        await chrome.storage.local.set({ attendanceRecords: records });
       }
     } catch {
-      /* ignore */
+      days = days.filter((d) => {
+        if (d > today) {
+          skippedFuture += 1;
+          return false;
+        }
+        return true;
+      });
     }
 
     running = true;
@@ -363,15 +413,16 @@
         ? `，日期不一致 ${mismatchCount}`
         : '';
       const restTip = skippedRest ? `，跳过休息日 ${skippedRest}` : '';
+      const futureTip = skippedFuture ? `，跳过未来 ${skippedFuture}` : '';
       if (contextDead) {
         setMeta(
-          `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}`
+          `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}`
         );
       } else {
         setMeta(
           abortFlag
-            ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}。可打开插件弹窗查看日历。`
-            : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}。可打开插件弹窗查看日历。`
+            ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}。可打开插件弹窗查看日历。`
+            : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}。可打开插件弹窗查看日历。`
         );
       }
 

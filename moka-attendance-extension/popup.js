@@ -32,6 +32,7 @@ const statusMetaEl = document.getElementById('statusMeta');
 
 const STATUS_TEXT = {
   ok: '已计算',
+  rest: '休息日',
   no_checkout: '缺下班卡',
   no_clock: '无打卡',
   incomplete: '数据不完整'
@@ -56,6 +57,12 @@ async function load() {
   ]);
   allRecords = stored[STORAGE_KEY] || {};
   allDayMeta = stored[DAY_META_KEY] || {};
+  // 打开弹窗时纠偏：休息日误存的「无打卡」改为 rest
+  const norm = MokaHours.normalizeRestRecords(allRecords, allDayMeta);
+  if (norm.changed) {
+    allRecords = norm.records;
+    chrome.storage.local.set({ [STORAGE_KEY]: allRecords });
+  }
   viewMonthKey = pickInitialMonth(allRecords, stored[VIEW_MONTH_KEY]);
   selectedDate = stored[SELECTED_DATE_KEY] || null;
   if (selectedDate && MokaHours.monthKeyFromDate(selectedDate) !== viewMonthKey) {
@@ -185,10 +192,15 @@ function renderCalendar(monthRecords) {
     }
 
     if (cell.date === selectedDate) btn.classList.add('selected');
-    if (cell.meta && cell.meta.isRestDay) btn.classList.add('is-rest');
+    const isRest = cell.isRestDay || MokaHours.resolveIsRestDay(cell.date, cell.meta);
+    if (isRest) btn.classList.add('is-rest');
     if (cell.meta && cell.meta.isWorkDay) btn.classList.add('is-work');
 
-    const hoursText = MokaHours.formatCalendarHours(cell.record, cell.meta);
+    const hoursText = MokaHours.formatCalendarHours(
+      cell.record,
+      cell.meta,
+      cell.date
+    );
     btn.innerHTML = `
       <span class="cal-day">${cell.day}</span>
       <span class="cal-emoji">${cell.emoji || ''}</span>
@@ -198,10 +210,10 @@ function renderCalendar(monthRecords) {
     if (cell.styleLabel) parts.push(cell.styleLabel);
     if (cell.record && cell.record.status === 'ok') {
       parts.push(MokaHours.formatDuration(cell.record.workMs));
+    } else if (isRest) {
+      parts.push('休息日');
     } else if (cell.record) {
       parts.push(STATUS_TEXT[cell.record.status] || cell.record.status);
-    } else if (cell.meta && cell.meta.isRestDay) {
-      parts.push('休息日');
     } else {
       parts.push('无记录');
     }
@@ -225,23 +237,24 @@ function renderDayDetail() {
   dayDetailEmptyEl.classList.add('hidden');
   dayDetailBodyEl.classList.remove('hidden');
 
+  const isRest = MokaHours.resolveIsRestDay(selectedDate, meta);
   const dayKind = meta
-    ? meta.isRestDay
+    ? isRest
       ? '休息日'
       : '工作日'
-    : '日期类型未知';
-  const style = MokaHours.calendarStyle(record, meta);
+    : isRest
+      ? '休息日（周末）'
+      : '工作日';
+  const style = MokaHours.calendarStyle(record, meta, selectedDate);
 
   if (!record) {
     dayDetailBodyEl.innerHTML = `
       <div class="item-top">
         <span class="date">${selectedDate}<span class="badge">${dayKind}</span></span>
-        <span class="hours">${style.emoji || ''} ${
-          meta && meta.isRestDay ? '休息' : '无记录'
-        }</span>
+        <span class="hours">${style.emoji || ''} ${isRest ? '休息' : '无记录'}</span>
       </div>
       <div class="meta">${
-        meta && meta.isRestDay
+        isRest
           ? '休息日无打卡为正常'
           : '可在考勤页点开该日详情以采集数据'
       }</div>
@@ -252,7 +265,7 @@ function renderDayDetail() {
   const hoursClass =
     record.status === 'ok'
       ? ''
-      : meta && meta.isRestDay
+      : isRest || record.status === 'rest'
         ? ''
         : record.status === 'no_checkout'
           ? 'warn'
@@ -260,8 +273,8 @@ function renderDayDetail() {
   const hoursText =
     record.status === 'ok'
       ? `${style.emoji || ''} ${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）`
-      : meta && meta.isRestDay && record.status === 'no_clock'
-        ? '休息日无打卡'
+      : isRest || record.status === 'rest'
+        ? '休息日'
         : STATUS_TEXT[record.status] || record.status;
   const clockLine = [
     record.clockInTime ? `上班 ${shortTime(record.clockInTime)}` : '上班 —',

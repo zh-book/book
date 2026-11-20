@@ -126,13 +126,21 @@
   }
 
   function isMonthCalendarPayload(payload) {
-    return Boolean(
-      payload &&
-        payload.code === 200 &&
-        payload.data &&
-        typeof payload.data.year === 'number' &&
-        typeof payload.data.month === 'number' &&
-        Array.isArray(payload.data.days)
+    if (!payload || typeof payload !== 'object') return false;
+    if (payload.code != null && Number(payload.code) !== 200) return false;
+    const data = payload.data || payload;
+    if (!data || typeof data !== 'object') return false;
+    const year = Number(data.year);
+    const month = Number(data.month);
+    return (
+      Number.isFinite(year) &&
+      Number.isFinite(month) &&
+      month >= 1 &&
+      month <= 12 &&
+      Array.isArray(data.days) &&
+      data.days.length > 0 &&
+      data.days[0] &&
+      typeof data.days[0].day === 'string'
     );
   }
 
