@@ -74,9 +74,30 @@
       </div>
     </section>
 
-    <section class="status" id="statusBox">
-      <div class="status-title">监听状态</div>
-      <div class="status-line" id="statusLine">尚未检测到接口请求</div>
+    <section class="calendar-wrap" aria-label="本月日历">
+      <div class="cal-weekdays">
+        <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span>
+      </div>
+      <div class="cal-grid" id="calendarGrid"></div>
+      <div class="cal-legend">
+        <span><i class="lg low"></i>&lt;8h</span>
+        <span><i class="lg mid"></i>8–10h</span>
+        <span><i class="lg high"></i>10–11h</span>
+        <span><i class="lg over"></i>≥11h</span>
+        <span><i class="lg warn"></i>异常</span>
+      </div>
+    </section>
+
+    <section class="day-detail" id="dayDetail">
+      <div class="day-detail-empty" id="dayDetailEmpty">点击日历中的日期查看明细</div>
+      <div class="day-detail-body hidden" id="dayDetailBody"></div>
+    </section>
+
+    <section class="status collapsed" id="statusBox">
+      <button type="button" class="status-toggle" id="statusToggle">
+        <span class="status-title">监听状态</span>
+        <span class="status-line" id="statusLine">尚未检测到接口请求</span>
+      </button>
       <div class="status-meta" id="statusMeta">
         安装/更新后请刷新考勤页，再点开某天详情。
       </div>
@@ -85,8 +106,6 @@
     <section class="hint" id="emptyHint">
       打开 Moka 考勤详情页并浏览日期后，本插件会自动捕获接口并计算工时。
     </section>
-
-    <ul class="list" id="list"></ul>
 
     <script src="hours.js"></script>
     <script src="popup.js"></script>

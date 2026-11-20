@@ -125,4 +125,15 @@ assert(exportPayload.app === 'moka-attendance-extension', '导出包装错误');
 const parsed = MokaHours.parseImportPayload(JSON.stringify(exportPayload));
 assert(parsed['2026-08-06'].workMs === 1, '导入解析错误');
 
+const cal = MokaHours.buildMonthCalendar('2026-08', {
+  '2026-08-06': { date: '2026-08-06', status: 'ok', workMs: 10.1 * 3600000 }
+});
+assert(cal.length % 7 === 0, '日历格数应为 7 的倍数');
+const day6 = cal.find((c) => c.date === '2026-08-06');
+assert(day6 && day6.level === 'high', `8/6 等级应为 high，实际 ${day6 && day6.level}`);
+assert(
+  MokaHours.formatCalendarHours(day6.record) === '10.1',
+  `日历工时格式错误: ${MokaHours.formatCalendarHours(day6.record)}`
+);
+
 console.log('All hours tests passed.');

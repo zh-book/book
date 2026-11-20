@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'attendanceRecords';
 const DEBUG_KEY = 'debugInfo';
 const VIEW_MONTH_KEY = 'viewMonthKey';
+const SELECTED_DATE_KEY = 'selectedDate';
 
 const monthLabelEl = document.getElementById('monthLabel');
 const monthRangeHintEl = document.getElementById('monthRangeHint');
@@ -15,12 +16,16 @@ const allDayCountEl = document.getElementById('allDayCount');
 const allTotalHoursEl = document.getElementById('allTotalHours');
 const allAvgHoursEl = document.getElementById('allAvgHours');
 
-const listEl = document.getElementById('list');
+const calendarGridEl = document.getElementById('calendarGrid');
+const dayDetailEmptyEl = document.getElementById('dayDetailEmpty');
+const dayDetailBodyEl = document.getElementById('dayDetailBody');
 const emptyHintEl = document.getElementById('emptyHint');
 const clearBtn = document.getElementById('clearBtn');
 const exportBtn = document.getElementById('exportBtn');
 const importBtn = document.getElementById('importBtn');
 const importFile = document.getElementById('importFile');
+const statusBoxEl = document.getElementById('statusBox');
+const statusToggleEl = document.getElementById('statusToggle');
 const statusLineEl = document.getElementById('statusLine');
 const statusMetaEl = document.getElementById('statusMeta');
 
@@ -35,15 +40,22 @@ const STATUS_TEXT = {
 let allRecords = {};
 /** @type {string} */
 let viewMonthKey = MokaHours.currentMonthKey();
+/** @type {string|null} */
+let selectedDate = null;
 
 async function load() {
   const stored = await chrome.storage.local.get([
     STORAGE_KEY,
     DEBUG_KEY,
-    VIEW_MONTH_KEY
+    VIEW_MONTH_KEY,
+    SELECTED_DATE_KEY
   ]);
   allRecords = stored[STORAGE_KEY] || {};
   viewMonthKey = pickInitialMonth(allRecords, stored[VIEW_MONTH_KEY]);
+  selectedDate = stored[SELECTED_DATE_KEY] || null;
+  if (selectedDate && MokaHours.monthKeyFromDate(selectedDate) !== viewMonthKey) {
+    selectedDate = null;
+  }
   renderAll();
   renderStatus(stored[DEBUG_KEY] || null);
 }
@@ -124,61 +136,107 @@ function renderMonthNav() {
     ? `有数据月份 ${months.length} 个（${MokaHours.formatMonthLabel(months[0])} ~ ${MokaHours.formatMonthLabel(months[months.length - 1])}）`
     : `当前月无数据；有数据：${MokaHours.formatMonthLabel(months[0])} ~ ${MokaHours.formatMonthLabel(months[months.length - 1])}`;
 
-  // 允许翻到相邻空月，但不要无限远：以有数据范围 ±1 月为界，若无数据则不限制当前月邻域
   const minKey = MokaHours.shiftMonthKey(months[0], -1);
   const maxKey = MokaHours.shiftMonthKey(months[months.length - 1], 1);
   prevMonthBtn.disabled = viewMonthKey <= minKey;
   nextMonthBtn.disabled = viewMonthKey >= maxKey;
 }
 
-function renderList(monthRecords) {
-  const items = Object.values(monthRecords).sort((a, b) =>
-    a.date < b.date ? 1 : a.date > b.date ? -1 : 0
-  );
+function renderCalendar(monthRecords) {
+  const cells = MokaHours.buildMonthCalendar(viewMonthKey, monthRecords);
+  calendarGridEl.innerHTML = '';
 
+  for (const cell of cells) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `cal-cell level-${cell.level}`;
+    if (!cell.inMonth) {
+      btn.classList.add('out');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="cal-day"></span><span class="cal-hours"></span>';
+      calendarGridEl.appendChild(btn);
+      continue;
+    }
+
+    if (cell.date === selectedDate) btn.classList.add('selected');
+    const hoursText = MokaHours.formatCalendarHours(cell.record);
+    btn.innerHTML = `
+      <span class="cal-day">${cell.day}</span>
+      <span class="cal-hours">${hoursText ? escapeHtml(hoursText) : ''}</span>
+    `;
+    btn.title = cell.record
+      ? `${cell.date} · ${
+          cell.record.status === 'ok'
+            ? MokaHours.formatDuration(cell.record.workMs)
+            : STATUS_TEXT[cell.record.status] || cell.record.status
+        }`
+      : `${cell.date} · 无记录`;
+    btn.addEventListener('click', () => selectDate(cell.date));
+    calendarGridEl.appendChild(btn);
+  }
+}
+
+function renderDayDetail() {
+  const record = selectedDate ? allRecords[selectedDate] : null;
+  if (!selectedDate) {
+    dayDetailEmptyEl.classList.remove('hidden');
+    dayDetailEmptyEl.textContent = '点击日历中的日期查看明细';
+    dayDetailBodyEl.classList.add('hidden');
+    dayDetailBodyEl.innerHTML = '';
+    return;
+  }
+
+  dayDetailEmptyEl.classList.add('hidden');
+  dayDetailBodyEl.classList.remove('hidden');
+
+  if (!record) {
+    dayDetailBodyEl.innerHTML = `
+      <div class="item-top">
+        <span class="date">${selectedDate}</span>
+        <span class="hours bad">无记录</span>
+      </div>
+      <div class="meta">可在考勤页点开该日详情以采集数据</div>
+    `;
+    return;
+  }
+
+  const hoursClass =
+    record.status === 'ok' ? '' : record.status === 'no_checkout' ? 'warn' : 'bad';
+  const hoursText =
+    record.status === 'ok'
+      ? `${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）`
+      : STATUS_TEXT[record.status] || record.status;
+  const clockLine = [
+    record.clockInTime ? `上班 ${shortTime(record.clockInTime)}` : '上班 —',
+    record.clockOutTime ? `下班 ${shortTime(record.clockOutTime)}` : '下班 —'
+  ].join(' · ');
+
+  dayDetailBodyEl.innerHTML = `
+    <div class="item-top">
+      <span class="date">${record.date}${
+        record.shiftName
+          ? `<span class="badge">${escapeHtml(record.shiftName)}</span>`
+          : ''
+      }</span>
+      <span class="hours ${hoursClass}">${hoursText}</span>
+    </div>
+    <div class="meta">${clockLine}${
+      record.status === 'ok'
+        ? ` · 毛时长 ${MokaHours.formatDuration(record.rawMs)} − 午休1h`
+        : ''
+    }</div>
+  `;
+}
+
+function renderEmptyHint(monthRecords) {
   const anyRecords = Object.keys(allRecords).length > 0;
-  emptyHintEl.classList.toggle('hidden', anyRecords);
+  const monthHas = Object.keys(monthRecords).length > 0;
+  emptyHintEl.classList.toggle('hidden', anyRecords && monthHas);
   if (!anyRecords) {
     emptyHintEl.textContent =
       '打开 Moka 考勤详情页并浏览日期后，本插件会自动捕获接口并计算工时。';
-  } else if (!items.length) {
-    emptyHintEl.classList.remove('hidden');
+  } else if (!monthHas) {
     emptyHintEl.textContent = `${MokaHours.formatMonthLabel(viewMonthKey)} 暂无记录，可切换月份或继续在考勤页点开该月日期。`;
-  }
-
-  listEl.innerHTML = '';
-  for (const record of items) {
-    const li = document.createElement('li');
-    li.className = 'item';
-
-    const hoursClass =
-      record.status === 'ok' ? '' : record.status === 'no_checkout' ? 'warn' : 'bad';
-    const hoursText =
-      record.status === 'ok'
-        ? `${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）`
-        : STATUS_TEXT[record.status] || record.status;
-
-    const clockLine = [
-      record.clockInTime ? `上班 ${shortTime(record.clockInTime)}` : '上班 —',
-      record.clockOutTime ? `下班 ${shortTime(record.clockOutTime)}` : '下班 —'
-    ].join(' · ');
-
-    li.innerHTML = `
-      <div class="item-top">
-        <span class="date">${record.date}${
-          record.shiftName
-            ? `<span class="badge">${escapeHtml(record.shiftName)}</span>`
-            : ''
-        }</span>
-        <span class="hours ${hoursClass}">${hoursText}</span>
-      </div>
-      <div class="meta">${clockLine}${
-        record.status === 'ok'
-          ? ` · 毛时长 ${MokaHours.formatDuration(record.rawMs)} − 午休1h`
-          : ''
-      }</div>
-    `;
-    listEl.appendChild(li);
   }
 }
 
@@ -198,7 +256,9 @@ function renderAll() {
     totalHours: allTotalHoursEl,
     avgHours: allAvgHoursEl
   });
-  renderList(monthRecords);
+  renderCalendar(monthRecords);
+  renderDayDetail();
+  renderEmptyHint(monthRecords);
 }
 
 function shortTime(value) {
@@ -214,21 +274,40 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;');
 }
 
+async function selectDate(date) {
+  selectedDate = date;
+  await chrome.storage.local.set({ [SELECTED_DATE_KEY]: date });
+  renderCalendar(MokaHours.filterRecordsByMonth(allRecords, viewMonthKey));
+  renderDayDetail();
+}
+
 async function changeMonth(delta) {
   const next = MokaHours.shiftMonthKey(viewMonthKey, delta);
   if (!next) return;
   viewMonthKey = next;
-  await chrome.storage.local.set({ [VIEW_MONTH_KEY]: viewMonthKey });
+  selectedDate = null;
+  await chrome.storage.local.set({
+    [VIEW_MONTH_KEY]: viewMonthKey,
+    [SELECTED_DATE_KEY]: null
+  });
   renderAll();
 }
 
 prevMonthBtn.addEventListener('click', () => changeMonth(-1));
 nextMonthBtn.addEventListener('click', () => changeMonth(1));
 
+statusToggleEl.addEventListener('click', () => {
+  statusBoxEl.classList.toggle('collapsed');
+});
+
 clearBtn.addEventListener('click', async () => {
   if (!confirm('确定清空本地已记录的工时数据？')) return;
   allRecords = {};
-  await chrome.storage.local.set({ [STORAGE_KEY]: {} });
+  selectedDate = null;
+  await chrome.storage.local.set({
+    [STORAGE_KEY]: {},
+    [SELECTED_DATE_KEY]: null
+  });
   renderAll();
 });
 
@@ -276,7 +355,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes[STORAGE_KEY]) {
     allRecords = changes[STORAGE_KEY].newValue || {};
-    // 新捕获的日期若落在其他月，自动跳到该月，方便立刻看到
     const months = MokaHours.listMonthKeys(allRecords);
     if (months.length && !months.includes(viewMonthKey)) {
       viewMonthKey = months[months.length - 1];

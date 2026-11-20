@@ -147,6 +147,68 @@
     return out;
   }
 
+  /** 日历格短工时，如 10.1 / 缺卡 / 空 */
+  function formatCalendarHours(record) {
+    if (!record) return '';
+    if (record.status === 'ok' && record.workMs != null) {
+      return (record.workMs / 3600000).toFixed(1);
+    }
+    if (record.status === 'no_checkout') return '缺下班';
+    if (record.status === 'no_clock') return '无打卡';
+    return '—';
+  }
+
+  /**
+   * 生成某月日历格（周一为一周起点）
+   * 每格：{ date|null, day, inMonth, record|null, level }
+   */
+  function buildMonthCalendar(monthKey, records) {
+    const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if (!m) return [];
+    const year = Number(m[1]);
+    const month = Number(m[2]) - 1;
+    const first = new Date(year, month, 1);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // JS: 0=Sun..6=Sat → 周一=0
+    const startOffset = (first.getDay() + 6) % 7;
+    const cells = [];
+    const total = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+
+    for (let i = 0; i < total; i += 1) {
+      const dayNum = i - startOffset + 1;
+      if (dayNum < 1 || dayNum > daysInMonth) {
+        cells.push({
+          date: null,
+          day: null,
+          inMonth: false,
+          record: null,
+          level: 'empty'
+        });
+        continue;
+      }
+      const date = `${m[1]}-${m[2]}-${String(dayNum).padStart(2, '0')}`;
+      const record = (records && records[date]) || null;
+      cells.push({
+        date,
+        day: dayNum,
+        inMonth: true,
+        record,
+        level: calendarLevel(record)
+      });
+    }
+    return cells;
+  }
+
+  function calendarLevel(record) {
+    if (!record) return 'none';
+    if (record.status !== 'ok' || record.workMs == null) return 'warn';
+    const h = record.workMs / 3600000;
+    if (h < 8) return 'low';
+    if (h < 10) return 'mid';
+    if (h < 11) return 'high';
+    return 'over';
+  }
+
   /**
    * 合并考勤记录：同日期取 updatedAt 更新的；缺 updatedAt 时导入侧覆盖。
    * 返回 { merged, added, updated, skipped }
@@ -217,6 +279,9 @@
     summarizeRecords,
     listMonthKeys,
     filterRecordsByMonth,
+    formatCalendarHours,
+    buildMonthCalendar,
+    calendarLevel,
     mergeRecords,
     buildExportPayload,
     parseImportPayload
