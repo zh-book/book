@@ -234,4 +234,37 @@ assert(
   '休息日日历格不应显示「无打卡」'
 );
 
+// 休息日加班：记录工时但不进汇总
+const restOtRecords = {
+  '2026-12-01': {
+    date: '2026-12-01',
+    status: 'ok',
+    workMs: 8 * 3600000
+  },
+  '2026-12-05': {
+    date: '2026-12-05',
+    status: 'ok',
+    workMs: 2 * 3600000,
+    isRestDay: true
+  }
+};
+const restOtSummary = MokaHours.summarizeRecords(restOtRecords, extracted.days);
+assert(restOtSummary.dayCount === 1, '休息日加班不应计入天数');
+assert(restOtSummary.totalMs === 8 * 3600000, '休息日加班不应计入合计');
+assert(
+  MokaHours.formatCalendarHours(
+    restOtRecords['2026-12-05'],
+    extracted.days['2026-12-05'],
+    '2026-12-05'
+  ) === '2.0',
+  '休息日加班仍应在日历显示工时'
+);
+assert(
+  !MokaHours.countsTowardStats(
+    restOtRecords['2026-12-05'],
+    extracted.days['2026-12-05']
+  ),
+  '休息日加班 countsTowardStats 应为 false'
+);
+
 console.log('All hours tests passed.');

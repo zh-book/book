@@ -162,19 +162,22 @@ async function handleAttendanceDetail(payload, meta) {
   if (!record) return null;
 
   const stored = await chrome.storage.local.get([STORAGE_KEY, DAY_META_KEY]);
-  const dayMeta = (stored[DAY_META_KEY] || {})[record.date] || null;
-  // 休息日无打卡属正常：勿登记成「无打卡」
-  if (
-    (record.status === 'no_clock' || record.status === 'incomplete') &&
-    self.MokaHours.resolveIsRestDay(record.date, dayMeta)
-  ) {
-    record = { ...record, status: 'rest' };
+  const allMeta = stored[DAY_META_KEY] || {};
+  const dayMeta = allMeta[record.date] || null;
+  const isRest = self.MokaHours.resolveIsRestDay(record.date, dayMeta);
+  // 休息日：无打卡标 rest；有加班也落库，但打 isRestDay，汇总时排除
+  if (isRest) {
+    if (record.status === 'no_clock' || record.status === 'incomplete') {
+      record = { ...record, status: 'rest', isRestDay: true };
+    } else {
+      record = { ...record, isRestDay: true };
+    }
   }
 
   const records = stored[STORAGE_KEY] || {};
   records[record.date] = record;
   await chrome.storage.local.set({ [STORAGE_KEY]: records });
-  updateBadge(records);
+  updateBadge(records, allMeta);
   return record;
 }
 
@@ -194,7 +197,7 @@ async function handleMonthCalendar(payload, meta) {
   );
   if (norm.changed) {
     await chrome.storage.local.set({ [STORAGE_KEY]: norm.records });
-    updateBadge(norm.records);
+    updateBadge(norm.records, allMeta);
   }
 
   await setDebug({
@@ -208,12 +211,11 @@ async function handleMonthCalendar(payload, meta) {
   return extracted;
 }
 
-function updateBadge(records) {
-  const days = Object.values(records).filter((r) => r.status === 'ok');
-  const totalMs = days.reduce((sum, r) => sum + (r.workMs || 0), 0);
-  const hours = totalMs / 3600000;
+function updateBadge(records, dayMeta) {
+  const summary = self.MokaHours.summarizeRecords(records || {}, dayMeta || {});
+  const hours = summary.totalMs / 3600000;
   const text =
-    days.length === 0
+    summary.dayCount === 0
       ? ''
       : hours >= 100
         ? String(Math.round(hours))
@@ -223,20 +225,22 @@ function updateBadge(records) {
   chrome.action.setBadgeText({ text });
   chrome.action.setTitle({
     title:
-      days.length === 0
+      summary.dayCount === 0
         ? 'Moka 考勤工时'
-        : `已记录 ${days.length} 天，合计 ${self.MokaHours.formatDuration(totalMs)}`
+        : `工作日 ${summary.dayCount} 天，合计 ${self.MokaHours.formatDuration(summary.totalMs)}（休息日加班不计入）`
   });
 }
 
-chrome.storage.local.get(STORAGE_KEY).then((stored) => {
-  updateBadge(stored[STORAGE_KEY] || {});
+chrome.storage.local.get([STORAGE_KEY, DAY_META_KEY]).then((stored) => {
+  updateBadge(stored[STORAGE_KEY] || {}, stored[DAY_META_KEY] || {});
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes[STORAGE_KEY]) {
-    updateBadge(changes[STORAGE_KEY].newValue || {});
-  }
+  if (area !== 'local') return;
+  if (!changes[STORAGE_KEY] && !changes[DAY_META_KEY]) return;
+  chrome.storage.local.get([STORAGE_KEY, DAY_META_KEY]).then((stored) => {
+    updateBadge(stored[STORAGE_KEY] || {}, stored[DAY_META_KEY] || {});
+  });
 });
 
 function isTarget(url) {

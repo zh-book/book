@@ -361,35 +361,12 @@
     });
   }
 
-  function writeRestPlaceholder(records, date, meta) {
-    const prev = records[date];
-    if (prev && prev.status !== 'no_clock' && prev.status !== 'incomplete' && prev.status !== 'rest') {
-      return false;
-    }
-    records[date] = {
-      date,
-      employeeId: (prev && prev.employeeId) || null,
-      shiftName: (prev && prev.shiftName) || (meta && meta.shiftName) || '',
-      clockInTime: null,
-      clockOutTime: null,
-      rawMs: null,
-      workMs: null,
-      lunchMs: 3600000,
-      status: 'rest',
-      updatedAt: Date.now()
-    };
-    return true;
-  }
-
   async function filterBatchDays(monthKey, allDays, today, calendarOk) {
-    let skippedRest = 0;
     let skippedFuture = 0;
-    const stored = await chrome.storage.local.get(['dayMeta', 'attendanceRecords']);
+    const stored = await chrome.storage.local.get(['dayMeta']);
     const metaMap = stored.dayMeta || {};
-    const records = { ...(stored.attendanceRecords || {}) };
-    let recordsDirty = false;
 
-    // 大小周：有当月工作日历时只信 type=1/2，不再用周末兜底（大周周六要上班）
+    // 休息日也拉（预防休息日加班）；仅跳过今天之后
     const monthMetaCount = Object.keys(metaMap).filter((d) =>
       d.startsWith(`${monthKey}-`)
     ).length;
@@ -400,28 +377,10 @@
         skippedFuture += 1;
         return false;
       }
-      const meta = metaMap[d] || null;
-      let isRest = false;
-      if (useCalendar) {
-        isRest = Boolean(meta && meta.isRestDay);
-      } else if (typeof MokaHours !== 'undefined' && MokaHours.resolveIsRestDay) {
-        isRest = MokaHours.resolveIsRestDay(d, meta);
-      } else {
-        const w = new Date(`${d}T12:00:00`).getDay();
-        isRest = w === 0 || w === 6;
-      }
-      if (isRest) {
-        skippedRest += 1;
-        if (writeRestPlaceholder(records, d, meta)) recordsDirty = true;
-        return false;
-      }
       return true;
     });
 
-    if (recordsDirty) {
-      await chrome.storage.local.set({ attendanceRecords: records });
-    }
-    return { days, skippedRest, skippedFuture, useCalendar, monthMetaCount };
+    return { days, skippedFuture, useCalendar, monthMetaCount };
   }
 
   async function startBatch() {
@@ -459,7 +418,6 @@
     if (stopBtn) stopBtn.hidden = false;
     setMonthNavDisabled(true);
 
-    let skippedRest = 0;
     let skippedFuture = 0;
     let calendarOk = false;
     let days = [];
@@ -490,13 +448,12 @@
 
       const filtered = await filterBatchDays(monthKey, allDays, today, calendarOk);
       days = filtered.days;
-      skippedRest = filtered.skippedRest;
       skippedFuture = filtered.skippedFuture;
 
       setMeta(
         calendarOk || filtered.useCalendar
-          ? `日历已就绪（${filtered.monthMetaCount} 天），待拉工作日 ${days.length}，跳过休息 ${skippedRest}，跳过未来 ${skippedFuture}；${BATCH_CONCURRENCY} 路并行`
-          : `无工作日历，待拉 ${days.length} 天（周末兜底跳过 ${skippedRest}）；${BATCH_CONCURRENCY} 路并行`
+          ? `日历已就绪（${filtered.monthMetaCount} 天），待拉 ${days.length} 天（含休息日加班），跳过未来 ${skippedFuture}；${BATCH_CONCURRENCY} 路并行`
+          : `待拉 ${days.length} 天（含休息日），跳过未来 ${skippedFuture}；${BATCH_CONCURRENCY} 路并行`
       );
       await sleep(200);
 
@@ -561,18 +518,17 @@
         const mismatchTip = mismatchCount
           ? `，日期不一致 ${mismatchCount}`
           : '';
-        const restTip = skippedRest ? `，跳过休息日 ${skippedRest}` : '';
         const futureTip = skippedFuture ? `，跳过未来 ${skippedFuture}` : '';
         const calTip = calendarOk ? '，日历已更新' : '，日历未刷新';
         if (contextDead) {
           setMeta(
-            `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}`
+            `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${futureTip}${calTip}`
           );
         } else {
           setMeta(
             abortFlag
-              ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}。可打开插件弹窗查看日历。`
-              : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}（${BATCH_CONCURRENCY} 路并行）。可打开插件弹窗查看日历。`
+              ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${futureTip}${calTip}。可打开插件弹窗查看日历。`
+              : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${futureTip}${calTip}（${BATCH_CONCURRENCY} 路并行）。休息日加班只记录不进统计。`
           );
         }
 

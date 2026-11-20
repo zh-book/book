@@ -327,38 +327,6 @@ h1 {
   color: #450a0a;
 }
 
-.cal-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 8px;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.cal-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cal-legend .lg {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  display: inline-block;
-  border: 1px solid var(--line);
-}
-
-.cal-legend .lg.rest { background: #f3f4f6; }
-.cal-legend .lg.h8 { background: #bbf7d0; }
-.cal-legend .lg.h10 { background: #fef08a; }
-.cal-legend .lg.h11 { background: #fdba74; }
-.cal-legend .lg.h12 { background: #fb923c; }
-.cal-legend .lg.h13 { background: #f87171; }
-.cal-legend .lg.h14 { background: #ef4444; }
-.cal-legend .lg.warn { background: #fff7ed; }
-
 .day-detail {
   margin: 0 16px 10px;
   padding: 12px;

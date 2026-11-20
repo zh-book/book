@@ -119,9 +119,23 @@
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   }
 
-  function summarizeRecords(records) {
+  /**
+   * 是否计入汇总：仅工作日有效打卡。
+   * 休息日加班仍会落库展示，但不进合计/日均，避免短加班拉低均值。
+   */
+  function countsTowardStats(record, meta) {
+    if (!record || record.status !== 'ok' || record.workMs == null) return false;
+    if (record.isRestDay === true || record.excludeFromStats === true) return false;
+    if (resolveIsRestDay(record.date, meta)) return false;
+    return true;
+  }
+
+  function summarizeRecords(records, dayMetaMap) {
+    const metaMap = dayMetaMap || {};
     const items = Object.values(records || {});
-    const okItems = items.filter((r) => r && r.status === 'ok' && r.workMs != null);
+    const okItems = items.filter((r) =>
+      countsTowardStats(r, (r && r.date && metaMap[r.date]) || null)
+    );
     const totalMs = okItems.reduce((sum, r) => sum + r.workMs, 0);
     return {
       dayCount: okItems.length,
@@ -354,16 +368,24 @@
     return calendarStyle(record, meta, dateStr).level;
   }
 
-  /** 将已存的「无打卡」在确认为休息日后改成 rest */
+  /**
+   * 纠偏休息日记录：无打卡→rest；有工时则打 isRestDay，便于统计排除。
+   */
   function normalizeRestRecords(records, dayMetaMap) {
     const next = { ...(records || {}) };
     let changed = 0;
     for (const [date, rec] of Object.entries(next)) {
       if (!rec) continue;
-      if (rec.status !== 'no_clock' && rec.status !== 'incomplete') continue;
       const meta = (dayMetaMap && dayMetaMap[date]) || null;
-      if (resolveIsRestDay(date, meta)) {
-        next[date] = { ...rec, status: 'rest' };
+      if (!resolveIsRestDay(date, meta)) continue;
+      if (rec.status === 'no_clock' || rec.status === 'incomplete') {
+        next[date] = { ...rec, status: 'rest', isRestDay: true };
+        changed += 1;
+      } else if (rec.status === 'ok' && rec.isRestDay !== true) {
+        next[date] = { ...rec, isRestDay: true };
+        changed += 1;
+      } else if (rec.status === 'rest' && rec.isRestDay !== true) {
+        next[date] = { ...rec, isRestDay: true };
         changed += 1;
       }
     }
@@ -439,6 +461,7 @@
     currentMonthKey,
     todayDateStr,
     isWeekendDate,
+    countsTowardStats,
     summarizeRecords,
     listMonthKeys,
     filterRecordsByMonth,

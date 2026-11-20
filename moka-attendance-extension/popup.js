@@ -272,7 +272,9 @@ function renderDayDetail() {
           : 'bad';
   const hoursText =
     record.status === 'ok'
-      ? `${style.emoji || ''} ${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）`
+      ? `${style.emoji || ''} ${MokaHours.formatDuration(record.workMs)}（${MokaHours.formatHoursDecimal(record.workMs)}h）${
+          isRest || record.isRestDay ? ' · 不计入统计' : ''
+        }`
       : isRest || record.status === 'rest'
         ? '休息日'
         : STATUS_TEXT[record.status] || record.status;
@@ -312,8 +314,8 @@ function renderEmptyHint(monthRecords) {
 
 function renderAll() {
   const monthRecords = MokaHours.filterRecordsByMonth(allRecords, viewMonthKey);
-  const monthSummary = MokaHours.summarizeRecords(monthRecords);
-  const allSummary = MokaHours.summarizeRecords(allRecords);
+  const monthSummary = MokaHours.summarizeRecords(monthRecords, allDayMeta);
+  const allSummary = MokaHours.summarizeRecords(allRecords, allDayMeta);
 
   renderMonthNav();
   renderSummary(monthSummary, {
