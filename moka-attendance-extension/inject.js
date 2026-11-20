@@ -6,6 +6,8 @@
   window.__mokaAttendanceHooked = true;
 
   const TARGET = '/api/abs/attendance/myAttendance/v2/m/detail';
+  // 工作日历：type=1 工作日 / type=2 休息日（含大小周）
+  const CALENDAR = '/api/abs/attendance/calendar/v1/m/list';
   const SOURCE = 'MOKA_ATTENDANCE_EXT';
   const DATE_KEYS = [
     'attendanceDate',
@@ -22,12 +24,22 @@
 
   /** @type {null | {method:string,url:string,body:string|null,headers:Object,sampleDate:string|null}} */
   let lastTemplate = null;
+  /** @type {null | {method:string,url:string,body:string|null,headers:Object}} */
+  let lastCalendarTemplate = null;
   /** 批量期间跳过对详情接口的二次挂钩处理，避免干扰 */
   let batchQuiet = false;
 
   function isTargetUrl(url) {
     try {
       return String(url || '').includes(TARGET);
+    } catch {
+      return false;
+    }
+  }
+
+  function isCalendarUrl(url) {
+    try {
+      return String(url || '').includes(CALENDAR);
     } catch {
       return false;
     }
@@ -104,6 +116,27 @@
     post('API_TEMPLATE', { template: lastTemplate });
   }
 
+  function rememberCalendarTemplate(partial) {
+    lastCalendarTemplate = {
+      method: partial.method || 'POST',
+      url: String(partial.url || `https://core.mokahr.com${CALENDAR}?bus=20`),
+      body: partial.body == null ? null : String(partial.body),
+      headers: pickUsefulHeaders(partial.headers || {}),
+      capturedAt: Date.now()
+    };
+    post('CALENDAR_TEMPLATE', { template: lastCalendarTemplate });
+  }
+
+  function publishCalendar(payload, url, via) {
+    if (!isMonthCalendarPayload(payload)) return false;
+    post('MONTH_CALENDAR', {
+      payload,
+      url: String(url || ''),
+      via: via || 'page'
+    });
+    return true;
+  }
+
   function publishDetail(payload, url, via) {
     const date =
       payload && payload.data && payload.data.attendanceDate
@@ -147,11 +180,87 @@
   function handleBody(text, url, via) {
     const json = tryParseJson(text);
     if (!json) return;
-    // 月历：区分工作日/休息日（type=2 / fixedTimeRest）
-    if (isMonthCalendarPayload(json)) {
-      post('MONTH_CALENDAR', { payload: json, url: String(url || ''), via });
+    // 工作日历接口，或响应体形似月历：更新 type=1/2
+    if (isCalendarUrl(url) || isMonthCalendarPayload(json)) {
+      publishCalendar(json, url, via);
     }
     if (isTargetUrl(url)) publishDetail(json, url, via);
+  }
+
+  function defaultCalendarUrl() {
+    return `https://core.mokahr.com${CALENDAR}?bus=20`;
+  }
+
+  async function fetchMonthCalendar(year, month) {
+    const y = Number(year);
+    const m = Number(month);
+    const base = lastCalendarTemplate || {
+      method: 'POST',
+      url: defaultCalendarUrl(),
+      body: null,
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/json'
+      }
+    };
+
+    const method = (base.method || 'POST').toUpperCase();
+    let url = base.url || defaultCalendarUrl();
+    try {
+      const u = new URL(url, location.origin);
+      if (!u.searchParams.has('bus')) u.searchParams.set('bus', '20');
+      url = u.toString();
+    } catch {
+      /* keep url */
+    }
+
+    // 沿用页面捕获到的 loginType 等字段，只改 year/month
+    let bodyObj = { loginType: '10', year: y, month: m };
+    if (base.body) {
+      const parsed = tryParseJson(base.body);
+      if (parsed && typeof parsed === 'object') {
+        bodyObj = { ...parsed, year: y, month: m };
+        if (bodyObj.loginType == null) bodyObj.loginType = '10';
+      }
+    }
+
+    const headers = Object.assign(
+      {
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/json'
+      },
+      base.headers || {}
+    );
+
+    const init = {
+      method,
+      credentials: 'include',
+      headers
+    };
+    if (method !== 'GET' && method !== 'HEAD') {
+      init.body = JSON.stringify(bodyObj);
+    }
+
+    const response = await originalFetch(url, init);
+    const text = await response.text();
+    const json = tryParseJson(text);
+    const ok =
+      response.ok &&
+      json &&
+      Number(json.code) === 200 &&
+      isMonthCalendarPayload(json);
+    if (ok) publishCalendar(json, url, 'batch-calendar');
+    return {
+      ok,
+      status: response.status,
+      url,
+      year: y,
+      month: m,
+      payload: json,
+      dayCount:
+        ok && json.data && Array.isArray(json.data.days) ? json.data.days.length : 0,
+      raw: text.slice(0, 500)
+    };
   }
 
   /** 把任意 YYYY-MM-DD 替换成目标日（不依赖 sampleDate 是否仍写在模板里） */
@@ -305,9 +414,28 @@
         .catch(() => rememberTemplate({ method, url, body: null, headers }));
     }
 
+    // 页面切月时顺带固化工作日历请求模板（loginType 等）
+    if (isCalendarUrl(url) && !batchQuiet) {
+      Promise.resolve(body)
+        .then((b) => {
+          let bodyStr = null;
+          if (b == null) bodyStr = null;
+          else if (typeof b === 'string') bodyStr = b;
+          else if (typeof b === 'object') {
+            try {
+              bodyStr = JSON.stringify(b);
+            } catch {
+              bodyStr = String(b);
+            }
+          } else bodyStr = String(b);
+          rememberCalendarTemplate({ method, url, body: bodyStr, headers });
+        })
+        .catch(() => rememberCalendarTemplate({ method, url, body: null, headers }));
+    }
+
     const promise = originalFetch(...args);
-    // detail 模板 + 月历工作日/休息日，都需要读响应
-    if (isMokahrApiUrl(url) && !batchQuiet) {
+    // detail + 工作日历：监听时持续更新 dayMeta（批量静默期间日历主动拉取另走通道）
+    if ((isMokahrApiUrl(url) || isCalendarUrl(url)) && !batchQuiet) {
       promise
         .then((response) => {
           response
@@ -354,16 +482,28 @@
         headers: this.__mokaHeaders || {}
       });
     }
-    if (isMokahrApiUrl(url) && !batchQuiet) {
+    if (isCalendarUrl(url) && !batchQuiet) {
+      const bodyStr =
+        body == null
+          ? null
+          : typeof body === 'string'
+            ? body
+            : body instanceof Document
+              ? null
+              : String(body);
+      rememberCalendarTemplate({
+        method: this.__mokaMethod || 'POST',
+        url,
+        body: bodyStr,
+        headers: this.__mokaHeaders || {}
+      });
+    }
+    if ((isMokahrApiUrl(url) || isCalendarUrl(url)) && !batchQuiet) {
       this.addEventListener('load', function () {
         try {
           if (typeof this.response === 'object' && this.response !== null) {
-            if (isMonthCalendarPayload(this.response)) {
-              post('MONTH_CALENDAR', {
-                payload: this.response,
-                url: String(url || ''),
-                via: 'xhr-json'
-              });
+            if (isCalendarUrl(url) || isMonthCalendarPayload(this.response)) {
+              publishCalendar(this.response, url, 'xhr-json');
             }
             if (isTargetUrl(url)) {
               publishDetail(this.response, url, 'xhr-json');
@@ -416,6 +556,33 @@
           post('FETCH_DAY_RESULT', {
             requestId,
             date: data.date,
+            result: {
+              ok: false,
+              status: 0,
+              error: String(err && err.message ? err.message : err)
+            }
+          });
+        });
+      return;
+    }
+
+    // 批量前主动拉工作日历（大小周 type=1/2）
+    if (data.type === 'FETCH_MONTH_CALENDAR' && data.year && data.month) {
+      const requestId = data.requestId;
+      fetchMonthCalendar(data.year, data.month)
+        .then((result) => {
+          post('FETCH_MONTH_CALENDAR_RESULT', {
+            requestId,
+            year: data.year,
+            month: data.month,
+            result
+          });
+        })
+        .catch((err) => {
+          post('FETCH_MONTH_CALENDAR_RESULT', {
+            requestId,
+            year: data.year,
+            month: data.month,
             result: {
               ok: false,
               status: 0,

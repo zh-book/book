@@ -62,6 +62,13 @@
       });
     }
 
+    if (data.type === 'CALENDAR_TEMPLATE' && data.template) {
+      safeSendMessage({
+        type: 'SAVE_CALENDAR_TEMPLATE',
+        template: data.template
+      });
+    }
+
     if (data.type === 'LOGIN_PROBE') {
       safeSendMessage({
         type: 'SAVE_LOGIN_PROBE',

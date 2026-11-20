@@ -3,6 +3,7 @@ importScripts('hours.js');
 const STORAGE_KEY = 'attendanceRecords';
 const DEBUG_KEY = 'debugInfo';
 const API_TEMPLATE_KEY = 'apiTemplate';
+const CALENDAR_TEMPLATE_KEY = 'calendarTemplate';
 const LOGIN_PROBE_KEY = 'loginProbe';
 const DAY_META_KEY = 'dayMeta';
 const TARGET_PATH = '/api/abs/attendance/myAttendance/v2/m/detail';
@@ -60,6 +61,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           hasTemplate: Boolean(message.template),
           templateMethod: message.template && message.template.method,
           templateSampleDate: message.template && message.template.sampleDate,
+          at: Date.now()
+        })
+      )
+      .then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (message.type === 'SAVE_CALENDAR_TEMPLATE') {
+    chrome.storage.local
+      .set({ [CALENDAR_TEMPLATE_KEY]: message.template || null })
+      .then(() =>
+        setDebug({
+          hasCalendarTemplate: Boolean(message.template),
+          calendarTemplateMethod: message.template && message.template.method,
           at: Date.now()
         })
       )

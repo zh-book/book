@@ -235,8 +235,8 @@
   }
 
   /**
-   * 休息日判定：优先月历；无月历时周末兜底。
-   * 月历标记 type=1 的周日调休仍算工作日。
+   * 休息日判定：优先工作日历 type（1=工作日，2=休息日，适配大小周）。
+   * 无当日元数据时才周末兜底——有日历时大周周六仍为 type=1。
    */
   function resolveIsRestDay(dateStr, meta) {
     if (meta && typeof meta.isRestDay === 'boolean') return meta.isRestDay;

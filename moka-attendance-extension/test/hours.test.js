@@ -180,6 +180,26 @@ assert(MokaHours.isMonthCalendarPayload(stringTypePayload), '应识别字符串 
 const extracted2 = MokaHours.extractDayMetaMap(stringTypePayload);
 assert(extracted2.days['2026-12-06'].isRestDay, '字符串 type=2 应为休息日');
 
+// 大小周：周六 type=1 仍是工作日
+const biweekPayload = {
+  code: 200,
+  data: {
+    year: 2026,
+    month: 10,
+    days: [
+      { day: '2026-10-10', type: 1, fixedTimeRest: false, workDay: false },
+      { day: '2026-10-11', type: 2, fixedTimeRest: true, workDay: false }
+    ]
+  }
+};
+const biweek = MokaHours.extractDayMetaMap(biweekPayload);
+assert(biweek.days['2026-10-10'].isWorkDay, '大周周六 type=1 应为工作日');
+assert(biweek.days['2026-10-11'].isRestDay, '周日 type=2 应为休息日');
+assert(
+  !MokaHours.resolveIsRestDay('2026-10-10', biweek.days['2026-10-10']),
+  '大小周工作周六不应被当成休息日'
+);
+
 // 无月历时周末兜底（2026-12-05 周六、2026-12-06 周日、2026-12-07 周一）
 assert(MokaHours.resolveIsRestDay('2026-12-05', null), '无元数据时周六应为休息日');
 assert(MokaHours.resolveIsRestDay('2026-12-06', null), '无元数据时周日应为休息日');

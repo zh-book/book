@@ -264,6 +264,97 @@
     });
   }
 
+  /** 批量前拉工作日历 calendar/v1/m/list */
+  function requestMonthCalendar(monthKey) {
+    const m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if (!m) return Promise.resolve({ ok: false, error: 'bad-month' });
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const requestId = `cal-${monthKey}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return new Promise((resolve) => {
+      pending.set(requestId, resolve);
+      window.postMessage(
+        {
+          source: SOURCE,
+          type: 'FETCH_MONTH_CALENDAR',
+          requestId,
+          year,
+          month
+        },
+        '*'
+      );
+      setTimeout(() => {
+        if (pending.has(requestId)) {
+          pending.delete(requestId);
+          resolve({ ok: false, status: 0, error: 'timeout' });
+        }
+      }, 20000);
+    });
+  }
+
+  function writeRestPlaceholder(records, date, meta) {
+    const prev = records[date];
+    if (prev && prev.status !== 'no_clock' && prev.status !== 'incomplete' && prev.status !== 'rest') {
+      return false;
+    }
+    records[date] = {
+      date,
+      employeeId: (prev && prev.employeeId) || null,
+      shiftName: (prev && prev.shiftName) || (meta && meta.shiftName) || '',
+      clockInTime: null,
+      clockOutTime: null,
+      rawMs: null,
+      workMs: null,
+      lunchMs: 3600000,
+      status: 'rest',
+      updatedAt: Date.now()
+    };
+    return true;
+  }
+
+  async function filterBatchDays(monthKey, allDays, today, calendarOk) {
+    let skippedRest = 0;
+    let skippedFuture = 0;
+    const stored = await chrome.storage.local.get(['dayMeta', 'attendanceRecords']);
+    const metaMap = stored.dayMeta || {};
+    const records = { ...(stored.attendanceRecords || {}) };
+    let recordsDirty = false;
+
+    // 大小周：有当月工作日历时只信 type=1/2，不再用周末兜底（大周周六要上班）
+    const monthMetaCount = Object.keys(metaMap).filter((d) =>
+      d.startsWith(`${monthKey}-`)
+    ).length;
+    const useCalendar = calendarOk || monthMetaCount > 0;
+
+    const days = allDays.filter((d) => {
+      if (d > today) {
+        skippedFuture += 1;
+        return false;
+      }
+      const meta = metaMap[d] || null;
+      let isRest = false;
+      if (useCalendar) {
+        isRest = Boolean(meta && meta.isRestDay);
+      } else if (typeof MokaHours !== 'undefined' && MokaHours.resolveIsRestDay) {
+        isRest = MokaHours.resolveIsRestDay(d, meta);
+      } else {
+        const w = new Date(`${d}T12:00:00`).getDay();
+        isRest = w === 0 || w === 6;
+      }
+      if (isRest) {
+        skippedRest += 1;
+        if (writeRestPlaceholder(records, d, meta)) recordsDirty = true;
+        return false;
+      }
+      return true;
+    });
+
+    if (recordsDirty) {
+      await chrome.storage.local.set({ attendanceRecords: records });
+    }
+    return { days, skippedRest, skippedFuture, useCalendar, monthMetaCount };
+  }
+
   async function startBatch() {
     if (running) return;
     if (!extensionAlive()) {
@@ -279,78 +370,17 @@
       return;
     }
 
-    let days = daysInMonth(monthKey);
-    if (!days.length) return;
+    const allDays = daysInMonth(monthKey);
+    if (!allDays.length) return;
 
-    // 不拉今天之后；休息日（月历 type=2 / fixedTimeRest，无月历时周末兜底）跳过
-    let skippedRest = 0;
-    let skippedFuture = 0;
     const today =
-      (typeof MokaHours !== 'undefined' && MokaHours.todayDateStr
+      typeof MokaHours !== 'undefined' && MokaHours.todayDateStr
         ? MokaHours.todayDateStr()
         : (() => {
             const n = new Date();
             const p = (x) => String(x).padStart(2, '0');
             return `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
-          })());
-
-    try {
-      const stored = await chrome.storage.local.get(['dayMeta', 'attendanceRecords']);
-      const metaMap = stored.dayMeta || {};
-      const records = { ...(stored.attendanceRecords || {}) };
-      let recordsDirty = false;
-
-      days = days.filter((d) => {
-        if (d > today) {
-          skippedFuture += 1;
-          return false;
-        }
-        const meta = metaMap[d] || null;
-        const isRest =
-          typeof MokaHours !== 'undefined' && MokaHours.resolveIsRestDay
-            ? MokaHours.resolveIsRestDay(d, meta)
-            : meta && meta.isRestDay === true
-              ? true
-              : (() => {
-                  const w = new Date(`${d}T12:00:00`).getDay();
-                  return w === 0 || w === 6;
-                })();
-        if (isRest) {
-          skippedRest += 1;
-          // 跳过拉取时写入 rest，避免界面仍显示「无打卡」
-          const prev = records[d];
-          if (!prev || prev.status === 'no_clock' || prev.status === 'incomplete') {
-            records[d] = {
-              date: d,
-              employeeId: (prev && prev.employeeId) || null,
-              shiftName: (prev && prev.shiftName) || (meta && meta.shiftName) || '',
-              clockInTime: null,
-              clockOutTime: null,
-              rawMs: null,
-              workMs: null,
-              lunchMs: 3600000,
-              status: 'rest',
-              updatedAt: Date.now()
-            };
-            recordsDirty = true;
-          }
-          return false;
-        }
-        return true;
-      });
-
-      if (recordsDirty) {
-        await chrome.storage.local.set({ attendanceRecords: records });
-      }
-    } catch {
-      days = days.filter((d) => {
-        if (d > today) {
-          skippedFuture += 1;
-          return false;
-        }
-        return true;
-      });
-    }
+          })();
 
     running = true;
     abortFlag = false;
@@ -359,85 +389,135 @@
     if (btn) btn.disabled = true;
     if (stopBtn) stopBtn.hidden = false;
 
-    // 冻结本批次模板；通知 background / inject 进入批量模式
-    window.postMessage({ source: SOURCE, type: 'GET_TEMPLATE' }, '*');
-    await sleep(200);
-    const baseTemplate = template
-      ? JSON.parse(JSON.stringify(template))
-      : {
-          method: 'GET',
-          url: 'https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail?bus=20',
-          body: null,
-          headers: { Accept: 'application/json, text/plain, */*' },
-          sampleDate: null
-        };
+    let skippedRest = 0;
+    let skippedFuture = 0;
+    let calendarOk = false;
+    let days = [];
 
-    window.postMessage({ source: SOURCE, type: 'BATCH_START' }, '*');
-    await safeSendMessage({ type: 'BATCH_START', monthKey });
-
-    let okCount = 0;
-    let failCount = 0;
-    let mismatchCount = 0;
     try {
-      for (let i = 0; i < days.length; i += 1) {
-        if (abortFlag || contextDead) break;
-        if (!extensionAlive()) {
-          contextDead = true;
-          break;
-        }
-        const date = days[i];
-        setMeta(`正在拉取 ${date}（${i + 1}/${days.length}）…`);
-        setProgress(i, days.length);
-
-        const result = await requestDayWithTemplate(date, baseTemplate);
-        const matched =
-          result &&
-          result.ok &&
-          result.payload &&
-          result.payload.code === 200 &&
-          result.dateMatched !== false;
-        if (matched) {
-          okCount += 1;
-        } else {
-          failCount += 1;
-          if (result && result.dateMatched === false) mismatchCount += 1;
-        }
-        await sleep(280);
-      }
-    } finally {
-      window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
-      await safeSendMessage({ type: 'BATCH_END' });
-
-      setProgress(days.length, days.length);
-      const mismatchTip = mismatchCount
-        ? `，日期不一致 ${mismatchCount}`
-        : '';
-      const restTip = skippedRest ? `，跳过休息日 ${skippedRest}` : '';
-      const futureTip = skippedFuture ? `，跳过未来 ${skippedFuture}` : '';
-      if (contextDead) {
-        setMeta(
-          `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}`
-        );
+      // 1) 先拉当月工作日历（type=1 工作日 / type=2 休息日，适配大小周）
+      setMeta(`正在获取 ${monthKey} 工作日历…`);
+      setProgress(0, 1);
+      const calResult = await requestMonthCalendar(monthKey);
+      calendarOk = Boolean(calResult && calResult.ok && calResult.payload);
+      if (calendarOk && calResult.payload) {
+        // 再走一遍 background，确保 dayMeta 落盘后再过滤
+        await safeSendMessage({
+          type: 'MONTH_CALENDAR',
+          payload: calResult.payload,
+          url: calResult.url || '',
+          via: 'batch-calendar'
+        });
+        await sleep(120);
       } else {
         setMeta(
-          abortFlag
-            ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}。可打开插件弹窗查看日历。`
-            : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}。可打开插件弹窗查看日历。`
+          `工作日历获取失败（${(calResult && calResult.error) || (calResult && calResult.status) || 'unknown'}），将尽量用已缓存日历…`
         );
+        await sleep(400);
       }
 
+      if (abortFlag || contextDead) throw new Error('aborted');
+
+      const filtered = await filterBatchDays(monthKey, allDays, today, calendarOk);
+      days = filtered.days;
+      skippedRest = filtered.skippedRest;
+      skippedFuture = filtered.skippedFuture;
+
+      setMeta(
+        calendarOk || filtered.useCalendar
+          ? `日历已就绪（${filtered.monthMetaCount} 天），待拉工作日 ${days.length}，跳过休息 ${skippedRest}，跳过未来 ${skippedFuture}`
+          : `无工作日历，待拉 ${days.length} 天（周末兜底跳过 ${skippedRest}）`
+      );
+      await sleep(200);
+
+      // 2) 冻结详情模板后进入批量
+      window.postMessage({ source: SOURCE, type: 'GET_TEMPLATE' }, '*');
+      await sleep(200);
+      const baseTemplate = template
+        ? JSON.parse(JSON.stringify(template))
+        : {
+            method: 'GET',
+            url: 'https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail?bus=20',
+            body: null,
+            headers: { Accept: 'application/json, text/plain, */*' },
+            sampleDate: null
+          };
+
+      window.postMessage({ source: SOURCE, type: 'BATCH_START' }, '*');
+      await safeSendMessage({ type: 'BATCH_START', monthKey });
+
+      let okCount = 0;
+      let failCount = 0;
+      let mismatchCount = 0;
+      try {
+        for (let i = 0; i < days.length; i += 1) {
+          if (abortFlag || contextDead) break;
+          if (!extensionAlive()) {
+            contextDead = true;
+            break;
+          }
+          const date = days[i];
+          setMeta(`正在拉取 ${date}（${i + 1}/${days.length}）…`);
+          setProgress(i, days.length);
+
+          const result = await requestDayWithTemplate(date, baseTemplate);
+          const matched =
+            result &&
+            result.ok &&
+            result.payload &&
+            result.payload.code === 200 &&
+            result.dateMatched !== false;
+          if (matched) {
+            okCount += 1;
+          } else {
+            failCount += 1;
+            if (result && result.dateMatched === false) mismatchCount += 1;
+          }
+          await sleep(280);
+        }
+      } finally {
+        window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
+        await safeSendMessage({ type: 'BATCH_END' });
+
+        setProgress(days.length, days.length);
+        const mismatchTip = mismatchCount
+          ? `，日期不一致 ${mismatchCount}`
+          : '';
+        const restTip = skippedRest ? `，跳过休息日 ${skippedRest}` : '';
+        const futureTip = skippedFuture ? `，跳过未来 ${skippedFuture}` : '';
+        const calTip = calendarOk ? '，日历已更新' : '，日历未刷新';
+        if (contextDead) {
+          setMeta(
+            `扩展已重新加载，请刷新本页。已成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}`
+          );
+        } else {
+          setMeta(
+            abortFlag
+              ? `已停止。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}。可打开插件弹窗查看日历。`
+              : `完成。成功 ${okCount}，失败/空 ${failCount}${mismatchTip}${restTip}${futureTip}${calTip}。可打开插件弹窗查看日历。`
+          );
+        }
+
+        await safeSendMessage({
+          type: 'BATCH_DONE',
+          monthKey,
+          okCount,
+          failCount,
+          mismatchCount,
+          calendarOk,
+          aborted: abortFlag || contextDead
+        });
+      }
+    } catch (err) {
+      window.postMessage({ source: SOURCE, type: 'BATCH_END' }, '*');
+      await safeSendMessage({ type: 'BATCH_END' });
+      if (!contextDead) {
+        setMeta(`批量中断：${String(err && err.message ? err.message : err)}`);
+      }
+    } finally {
       running = false;
       if (btn) btn.disabled = false;
       if (stopBtn) stopBtn.hidden = true;
-
-      await safeSendMessage({
-        type: 'BATCH_DONE',
-        monthKey,
-        okCount,
-        failCount,
-        mismatchCount,
-        aborted: abortFlag || contextDead
-      });
     }
   }
 
@@ -470,7 +550,10 @@
       return;
     }
 
-    if (data.type === 'FETCH_DAY_RESULT' && data.requestId) {
+    if (
+      (data.type === 'FETCH_DAY_RESULT' || data.type === 'FETCH_MONTH_CALENDAR_RESULT') &&
+      data.requestId
+    ) {
       const resolve = pending.get(data.requestId);
       if (resolve) {
         pending.delete(data.requestId);
