@@ -2,6 +2,8 @@ importScripts('hours.js');
 
 const STORAGE_KEY = 'attendanceRecords';
 const DEBUG_KEY = 'debugInfo';
+const API_TEMPLATE_KEY = 'apiTemplate';
+const LOGIN_PROBE_KEY = 'loginProbe';
 const TARGET_PATH = '/api/abs/attendance/myAttendance/v2/m/detail';
 const TARGET_URLS = [
   'https://core.mokahr.com/api/abs/attendance/myAttendance/v2/m/detail*'
@@ -35,13 +37,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'SAVE_API_TEMPLATE') {
+    chrome.storage.local
+      .set({ [API_TEMPLATE_KEY]: message.template || null })
+      .then(() =>
+        setDebug({
+          hasTemplate: Boolean(message.template),
+          templateMethod: message.template && message.template.method,
+          templateSampleDate: message.template && message.template.sampleDate,
+          at: Date.now()
+        })
+      )
+      .then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (message.type === 'SAVE_LOGIN_PROBE') {
+    chrome.storage.local
+      .set({ [LOGIN_PROBE_KEY]: message.probe || null })
+      .then(() =>
+        setDebug({
+          loginProbeAt: Date.now(),
+          loginHasCookie: Boolean(message.probe && message.probe.hasCookie),
+          loginStorageKeys:
+            (message.probe && message.probe.storageKeys && message.probe.storageKeys.length) || 0
+        })
+      )
+      .then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (message.type === 'BATCH_DONE') {
+    setDebug({
+      lastBatchMonth: message.monthKey,
+      lastBatchOk: message.okCount,
+      lastBatchFail: message.failCount,
+      lastBatchAborted: Boolean(message.aborted),
+      lastBatchAt: Date.now()
+    }).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (message.type === 'GET_DEBUG') {
-    chrome.storage.local.get([DEBUG_KEY, STORAGE_KEY]).then((stored) => {
-      sendResponse({
-        debug: stored[DEBUG_KEY] || null,
-        recordCount: Object.keys(stored[STORAGE_KEY] || {}).length
+    chrome.storage.local
+      .get([DEBUG_KEY, STORAGE_KEY, API_TEMPLATE_KEY, LOGIN_PROBE_KEY])
+      .then((stored) => {
+        sendResponse({
+          debug: stored[DEBUG_KEY] || null,
+          recordCount: Object.keys(stored[STORAGE_KEY] || {}).length,
+          template: stored[API_TEMPLATE_KEY] || null,
+          loginProbe: stored[LOGIN_PROBE_KEY] || null
+        });
       });
-    });
     return true;
   }
 });
@@ -196,6 +243,18 @@ chrome.webRequest.onErrorOccurred.addListener(
 
 async function refetchAndStore(info) {
   try {
+    // 顺便固化请求模板，供批量拉取复用
+    await chrome.storage.local.set({
+      [API_TEMPLATE_KEY]: {
+        method: info.method || 'GET',
+        url: info.url,
+        body: info.body,
+        headers: { Accept: 'application/json, text/plain, */*' },
+        sampleDate: null,
+        capturedAt: Date.now()
+      }
+    });
+
     const headers = {
       Accept: 'application/json, text/plain, */*'
     };
@@ -216,6 +275,12 @@ async function refetchAndStore(info) {
 
     const response = await fetch(info.url, init);
     const json = await response.json();
+    if (json && json.data && json.data.attendanceDate) {
+      const stored = await chrome.storage.local.get(API_TEMPLATE_KEY);
+      const tpl = stored[API_TEMPLATE_KEY] || {};
+      tpl.sampleDate = json.data.attendanceDate;
+      await chrome.storage.local.set({ [API_TEMPLATE_KEY]: tpl });
+    }
     await handleAttendanceDetail(json, { url: info.url, via: 'webRequest' });
   } catch (err) {
     await setDebug({

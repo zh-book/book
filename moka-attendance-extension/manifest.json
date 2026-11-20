@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Moka 考勤工时助手",
-  "version": "1.4.0",
-  "description": "监控 Moka 考勤详情接口，按打卡时间减去午休 1 小时统计工时；支持按月查看与数据导入导出",
+  "version": "1.5.0",
+  "description": "监控 Moka 考勤详情接口，按月批量拉取并统计每日/月均/总均工时",
   "permissions": [
     "storage",
     "scripting",
@@ -42,6 +42,18 @@
       ],
       "run_at": "document_start",
       "all_frames": true,
+      "world": "ISOLATED"
+    },
+    {
+      "matches": [
+        "https://core.mokahr.com/attendance*",
+        "https://*.mokahr.com/attendance*"
+      ],
+      "js": [
+        "page-panel.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false,
       "world": "ISOLATED"
     }
   ],

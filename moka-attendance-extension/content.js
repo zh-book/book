@@ -23,6 +23,27 @@
         via: data.via || 'page'
       });
     }
+
+    if (data.type === 'API_TEMPLATE' && data.template) {
+      chrome.runtime.sendMessage({
+        type: 'SAVE_API_TEMPLATE',
+        template: data.template
+      });
+    }
+
+    if (data.type === 'LOGIN_PROBE') {
+      chrome.runtime.sendMessage({
+        type: 'SAVE_LOGIN_PROBE',
+        probe: {
+          href: data.href,
+          hasCookie: data.hasCookie,
+          cookieLen: data.cookieLen,
+          storageKeys: data.storageKeys || [],
+          hasTemplate: data.hasTemplate,
+          at: Date.now()
+        }
+      });
+    }
   });
 
   chrome.runtime.sendMessage({

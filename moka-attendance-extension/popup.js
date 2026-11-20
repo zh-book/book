@@ -104,9 +104,25 @@ function renderStatus(debug) {
   if (debug.lastAt) lines.push(`最近处理 ${formatTime(debug.lastAt)}`);
   if (debug.lastVia) lines.push(`来源 ${debug.lastVia}`);
   if (debug.seenMethod) lines.push(`方法 ${debug.seenMethod}`);
+  if (debug.hasTemplate) {
+    lines.push(
+      `接口模板 ${debug.templateMethod || ''} ${debug.templateSampleDate || ''}`.trim()
+    );
+  }
+  if (debug.loginProbeAt) {
+    lines.push(
+      `登录探测 ${formatTime(debug.loginProbeAt)} · cookie=${debug.loginHasCookie ? '有' : '无'} · storage键=${debug.loginStorageKeys || 0}`
+    );
+  }
+  if (debug.lastBatchAt) {
+    lines.push(
+      `批量 ${debug.lastBatchMonth || ''} 成功${debug.lastBatchOk || 0}/失败${debug.lastBatchFail || 0}${debug.lastBatchAborted ? '（已停止）' : ''}`
+    );
+  }
   if (debug.pageHref) lines.push(`页面 ${debug.pageHref}`);
   if (debug.seenUrl) lines.push(`请求 ${debug.seenUrl}`);
   if (debug.lastError) lines.push(`错误 ${debug.lastError}`);
+  lines.push('提示：打开 /attendance 页右下角可按月批量拉取');
   statusMetaEl.textContent = lines.join('\n') || '刷新考勤页并点开详情以触发接口';
 }
 
